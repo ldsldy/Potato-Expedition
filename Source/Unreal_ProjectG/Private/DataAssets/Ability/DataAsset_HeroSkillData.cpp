@@ -224,7 +224,7 @@ void UDataAsset_HeroSkillData::BuildRuntimeActionSequence(
     int32 AbilityLevel,
     TArray<FSkillActionRow>& OutRuntimeActions) const
 {
-    OutRuntimeActions = ActionSequence;
+    OutRuntimeActions = MainSequence;
     if (OutRuntimeActions.IsEmpty())
     {
         return;

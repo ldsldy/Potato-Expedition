@@ -226,7 +226,7 @@ public:
     TObjectPtr<UDataAsset_HeroSkillPresentation> PresentationData = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="스킬|메인 시퀀스", meta=(DisplayName="기본 액션 시퀀스"))
-    TArray<FSkillActionRow> ActionSequence;
+    TArray<FSkillActionRow> MainSequence;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="스킬|업그레이드(시작/종료)", meta=(DisplayName="세트 보너스 모디파이어"))
     TArray<FHeroSkillBuildModifier> SetBonusModifiers;

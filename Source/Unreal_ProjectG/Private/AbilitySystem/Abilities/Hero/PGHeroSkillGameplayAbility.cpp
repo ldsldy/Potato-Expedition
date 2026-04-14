@@ -36,7 +36,7 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
     bCommittedThisActivation = false;
 
     SkillData = Cast<UDataAsset_HeroSkillData>(GetCurrentSourceObject());
-    if (!SkillData || SkillData->ActionSequence.IsEmpty())
+    if (!SkillData || SkillData->MainSequence.IsEmpty())
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
@@ -63,7 +63,7 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
 
     if (RuntimeActionSequence.IsEmpty())
     {
-        RuntimeActionSequence = SkillData->ActionSequence;
+        RuntimeActionSequence = SkillData->MainSequence;
     }
 
     if (RuntimeActionSequence.IsEmpty())

@@ -50,7 +50,7 @@ namespace SkillCueHelper
     }
 }
 
-FGameplayEffectContextHandle  USkillAbilityTask::AddActorCueIntoSpecHandle(FGameplayEffectSpecHandle& InOutSpecHandle, const FEffectConfig& InEffectConfig) const
+FGameplayEffectContextHandle USkillAbilityTask::AddActorCueIntoSpecHandle(FGameplayEffectSpecHandle& InOutSpecHandle, const FEffectConfig& InEffectConfig) const
 {
     if (!InOutSpecHandle.IsValid() || !InOutSpecHandle.Data.IsValid()) return FGameplayEffectContextHandle();
 
