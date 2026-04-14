@@ -19,23 +19,21 @@ UHeroCombatComponent::UHeroCombatComponent()
 void UHeroCombatComponent::SetCombatMode(EHeroCombatMode NewCombatMode)
 {
     if (CombatMode == NewCombatMode) return;
-    CombatMode = NewCombatMode;
-    switch (CombatMode)
-    {
-        case EHeroCombatMode::Manual:
-            ActivateManualCombat();
-            break;
-        case EHeroCombatMode::Auto:
-            ActivateAutoCombat();
-            break;
-        case EHeroCombatMode::None:
-            DeactivateCombat();
-            break;
-        default:
-            break;
-    }
-}
 
+    CombatMode = NewCombatMode;
+
+    if (CombatMode == EHeroCombatMode::None)
+    {
+        CurrentTarget = nullptr;
+        StopCombat();
+    }
+    else
+    {
+        StartCombat();
+    }
+
+    SyncCombatState();
+}
 void UHeroCombatComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -46,9 +44,15 @@ void UHeroCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if(!OwningCharacter || CombatMode == EHeroCombatMode::None || !CurrentTarget.IsValid())
+    if (!ShouldRunCombatTick())
     {
-        SetComponentTickEnabled(false); // 전투 모드가 None이면 Tick 비활성화
+        RefreshCombatTickEnabled();
+        return;
+    }
+
+    AController* Controller = OwningCharacter->GetController();
+    if (!Controller)
+    {
         return;
     }
 
@@ -57,33 +61,11 @@ void UHeroCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
         CurrentTarget->GetActorLocation()
     );
 
-    const FRotator CurrentControlRot = OwningCharacter->GetControlRotation();
+    const FRotator CurrentControlRot = Controller->GetControlRotation();
     const FRotator TargetRot = FMath::RInterpTo(CurrentControlRot, LookAtRot, DeltaTime, 10.f);
 
-    OwningCharacter->GetController()->SetControlRotation(FRotator(TargetRot.Pitch, TargetRot.Yaw, 0.f));
+    Controller->SetControlRotation(FRotator(TargetRot.Pitch, TargetRot.Yaw, 0.f));
     OwningCharacter->SetActorRotation(FRotator(0.f, TargetRot.Yaw, 0.f));
-}
-
-void UHeroCombatComponent::ActivateManualCombat()
-{
-    CombatMode = EHeroCombatMode::Manual;
-    StartCombat();
-    SetComponentTickEnabled(false); // Manual 모드에서는 타깃이 있을 때만 Tick이 활성화 되어야 하므로, 일단 비활성화 상태로 시작
-}
-
-void UHeroCombatComponent::ActivateAutoCombat()
-{
-    CombatMode = EHeroCombatMode::Auto;
-    StartCombat();
-    SetComponentTickEnabled(true);
-}
-
-void UHeroCombatComponent::DeactivateCombat()
-{
-    CombatMode = EHeroCombatMode::None;
-    CurrentTarget = nullptr;
-    StopCombat();
-    SetComponentTickEnabled(false);
 }
 
 void UHeroCombatComponent::StartCombat()
@@ -156,37 +138,61 @@ void UHeroCombatComponent::RefreshBasicAttackTimer()
     StartBasicAttackTimer();
 }
 
-void UHeroCombatComponent::UpdateDetection()
+void UHeroCombatComponent::SyncCombatState()
 {
-    if(!OwningCharacter || CombatMode == EHeroCombatMode::None)
-    {
-        SetComponentTickEnabled(false); // 전투 모드가 None이면 Tick 비활성화
-        return;
-    }
+    RefreshCombatTickEnabled();
+    ApplyMovementPolicy();
+}
 
-    // 현재 타깃은 가장 가까운 적으로 변경
-    CurrentTarget = FindNearestEnemy();
-
-    // 유효한 타깃이 없으면 틱을 종료하면서 캐릭터 회전을 Movement 방향으로 돌려놓음
-    // Auto 모드라면 항상 틱이 활성화 되어 있어야 하지만, Manual 모드에서는 타깃이 없을 때 틱을 비활성화하여 불필요한 연산을 줄임
-    if (!CurrentTarget.IsValid() && CombatMode == EHeroCombatMode::Manual)
+void UHeroCombatComponent::RefreshCombatTickEnabled()
+{
+    // Combat Tick이 실행되어야 하는지 여부를 판단하여 Tick 활성화 상태를 갱신
+    const bool bShouldEnableTick = ShouldRunCombatTick();
+    if (IsComponentTickEnabled() != bShouldEnableTick)
     {
-        SetComponentTickEnabled(false);
-        if (OwningCharacter->GetCharacterMovement())
-        {
-            OwningCharacter->GetCharacterMovement()->bOrientRotationToMovement = true; // Movement 방향으로 회전하도록 설정
-            OwningCharacter->GetCharacterMovement()->MaxWalkSpeed = 500.f;  // TODO: 기본 이동 속도는 캐릭터 데이터에서 가져오도록 변경 필요
-        }
-        return;
-    }
-    else
-    {
-        SetComponentTickEnabled(true); // 유효한 타깃이 있으면 Tick 활성화, 없으면 비활성화
-        OwningCharacter->GetCharacterMovement()->bOrientRotationToMovement = false; // 회전을 캐릭터 방향으로 고정
-        OwningCharacter->GetCharacterMovement()->MaxWalkSpeed = 300.f;  // TODO: 전투 이동 속도는 캐릭터 데이터에서 가져오도록 변경 필요
+        SetComponentTickEnabled(bShouldEnableTick);
     }
 }
 
+bool UHeroCombatComponent::ShouldRunCombatTick() const
+{
+    // CombatMode가 None이 아니고 CurrentTarget이 있다면 True 반환, 그렇지 않으면 False 반환
+    return OwningCharacter
+        && CombatMode != EHeroCombatMode::None
+        && CurrentTarget.IsValid();
+}
+
+void UHeroCombatComponent::ApplyMovementPolicy()
+{
+    if (!OwningCharacter || CombatMode == EHeroCombatMode::None)
+    {
+        return;
+    }
+
+    UCharacterMovementComponent* MovementComponent = OwningCharacter->GetCharacterMovement();
+    if (!MovementComponent)
+    {
+        return;
+    }
+
+    const bool bUseCombatMovement = CombatMode == EHeroCombatMode::Auto || CurrentTarget.IsValid();
+
+    MovementComponent->bOrientRotationToMovement = !bUseCombatMovement;
+    MovementComponent->MaxWalkSpeed = bUseCombatMovement ? 300.f : 500.f;
+}
+
+void UHeroCombatComponent::UpdateDetection()
+{
+    if (!OwningCharacter || CombatMode == EHeroCombatMode::None)
+    {
+        CurrentTarget = nullptr;
+        SyncCombatState();
+        return;
+    }
+
+    CurrentTarget = FindNearestEnemy();
+    SyncCombatState();
+}
 void UHeroCombatComponent::HandleBasicAttack()
 {
     if(!OwningCharacter || !CurrentTarget.IsValid() || CombatMode == EHeroCombatMode::None) return;

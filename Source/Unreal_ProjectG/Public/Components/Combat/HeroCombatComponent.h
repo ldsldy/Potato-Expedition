@@ -27,11 +27,13 @@ protected:
     virtual void BeginPlay() override;
     void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
     
-    void ActivateManualCombat();    // 수동전투 활성화 함수
-    void ActivateAutoCombat();      // 자동전투 활성화 함수
-    void DeactivateCombat();        // 전투 비활성화 함수
 
 private:
+    void SyncCombatState();                           // 전투 상태 동기화 함수(CombatMode과 CurrentTarget에 따라 Tick 활성화 여부와 이동 정책 적용)
+    void RefreshCombatTickEnabled();                  // Combat Tick 활성화 여부 갱신 함수
+    void ApplyMovementPolicy();                       // 이동 정책 적용 함수(CombatMode에 따라 이동을 멈추거나 속도 변경등을 하도록 설정)
+    bool ShouldRunCombatTick() const;                 // Combat Tick을 실행해야 하는지 여부를 판단하는 함수(CurrentTarget이 유효한지, CombatMode가 None이 아닌지 등)
+
     
     void StartDetectTimer();                          // 탐색 타이머 시작 함수
     void StopDetectTimer();                           // 탐색 타이머 중지 함수
@@ -42,7 +44,6 @@ private:
 
     void UpdateDetection();
     void HandleBasicAttack();                         // 기본 공격 처리 함수
-    void HandleAutoCombat();                          // 자동 공격 처리 함수
 
     AActor* FindNearestEnemy() const;                 // 가장 가까운 적을 찾는 함수
 
@@ -73,5 +74,4 @@ private:
     FTimerHandle DetectTimerHandle; // 탐색 타이머를 관리하는 핸들
     FTimerHandle BasicAttackTimerHandle; // 기본 공격 타이머 핸들
 
-    bool bWasTargetInAttackRange = false; // 타겟이 기본 공격 범위 내에 있었는지 여부를 추적하는 변수
 };
