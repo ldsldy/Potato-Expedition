@@ -9,6 +9,7 @@
 class UAbilitySystemComponent;
 class UDataAsset_HeroSkillPresentation;
 
+// 액션 타입. 어떤 종류의 액션인지 정의합니다.
 UENUM(BlueprintType)
 enum class ESkillActionType : uint8
 {
@@ -18,6 +19,7 @@ enum class ESkillActionType : uint8
     Buff            UMETA(DisplayName = "Buff"),
 };
 
+// 이벤트 트리거 타입. 어떤 상황에서 이벤트 액션이 발동할지 정의합니다.
 UENUM(BlueprintType)
 enum class EHeroSkillEventTrigger : uint8
 {
@@ -25,6 +27,7 @@ enum class EHeroSkillEventTrigger : uint8
     OnKill          UMETA(DisplayName = "킬 시"),
 };
 
+// 업그레이드를 어떻게 적용할지 정의하는 열거형. 액션 시퀀스에 구조 변경이나 수치 변경을 가하는 단일 모디파이어를 정의합니다.
 UENUM(BlueprintType)
 enum class EHeroSkillBuildOpType : uint8
 {
@@ -36,6 +39,7 @@ enum class EHeroSkillBuildOpType : uint8
     OverrideEffectValue     UMETA(DisplayName = "이펙트 수치 덮어쓰기"),
 };
 
+// 액션의 수치 중 어떤 것을 덮어쓸지 정의하는 열거형.
 UENUM(BlueprintType)
 enum class EHeroSkillActionScalarField : uint8
 {
@@ -49,6 +53,7 @@ enum class EHeroSkillActionScalarField : uint8
     BuffMaxTargets,
 };
 
+// 액션의 이펙트 수치 중 어떤 것을 덮어쓸지 정의하는 열거형.
 UENUM(BlueprintType)
 enum class EHeroSkillEffectScalarField : uint8
 {
@@ -57,6 +62,7 @@ enum class EHeroSkillEffectScalarField : uint8
     EffectDuration,
 };
 
+// 이벤트 액션 쿨다운 적용 범위.
 UENUM(BlueprintType)
 enum class EHeroSkillEventCooldownScope : uint8
 {
@@ -72,6 +78,7 @@ enum class EHeroSkillBodyMode : uint8
     FullBody        UMETA(DisplayName = "FullBody"),
 };
 
+// 스킬 액션 시퀀스의 각 액션을 정의하는 구조체. 액션 타입에 따라 필요한 설정을 담는 여러 구성 구조체를 포함합니다.
 USTRUCT(BlueprintType)
 struct FSkillActionRow
 {
@@ -96,6 +103,7 @@ struct FSkillActionRow
     FHeroBuffConfig BuffConfig;
 };
 
+// 업그레이드를 어떻게 적용할지 정의하는 구조체. 액션 시퀀스에 구조 변경이나 수치 변경을 가하는 단일 모디파이어를 정의합니다.
 USTRUCT(BlueprintType)
 struct FHeroSkillBuildOp
 {
@@ -141,6 +149,7 @@ struct FHeroSkillBuildOp
     FScalableFloat EffectScalarValue = FScalableFloat(0.f);
 };
 
+// 스킬 업그레이드 시 특정 세트 보너스 조건을 만족할 때 스킬 액션 시퀀스에 구조 변경이나 수치 변경을 가하는 모디파이어
 USTRUCT(BlueprintType)
 struct FHeroSkillBuildModifier
 {

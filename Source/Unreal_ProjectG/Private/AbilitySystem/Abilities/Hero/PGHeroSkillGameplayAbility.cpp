@@ -116,7 +116,6 @@ void UPGHeroSkillGameplayAbility::ExecuteNextAction()
 
     case ESkillActionType::SpawnActor:
     {
-        // SpawnActor 계열 반응은 SkillActor 내부에서 처리하므로 Ability로 RuntimeEvent를 올리지 않는다.
         USkillAbilityTask_SpawnActor* Task = USkillAbilityTask_SpawnActor::Create(
             this,
             CurrentAction,

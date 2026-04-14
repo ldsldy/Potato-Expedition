@@ -72,6 +72,7 @@ namespace HeroSkillDataRuntime
                 continue;
             }
 
+            // bUseHighestTierOnly가 true인 경우, 동일한 RequiredSetTag를 가진 모디파이어 중 RequiredSetPieceCount가 가장 높은 모디파이어만 찾아서 적용
             const FHeroSkillBuildModifier* const* Found = HighestTierBySet.Find(Modifier.RequiredSetTag);
             if (!Found || ((*Found)->RequiredSetPieceCount < Modifier.RequiredSetPieceCount))
             {

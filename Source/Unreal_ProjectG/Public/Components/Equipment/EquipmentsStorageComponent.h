@@ -30,13 +30,13 @@ public:
     // ==============================================================
     // 장비 장착 함수들
     // ==============================================================
-    UFUNCTION(BlueprintCallable, Category = "Combat")
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
     void EquipHeroWeapon(UDataAsset_WeaponData* InWeaponData);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
     void EquipHeroArmor(UDataAsset_ArmorData* InArmorData);
 
-    UFUNCTION(BlueprintCallable, Category = "Combat")
+    UFUNCTION(BlueprintCallable, Category = "Equipment")
     void EquipHeroAccessory(UDataAsset_AccessoryData* InAccessoryData);
 
 public:
