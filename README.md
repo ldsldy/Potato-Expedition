@@ -1,5 +1,5 @@
 # 감자 원정대
-<img src="./Document/Images/Title.png" alt="타이틀" width="700"/>
+<img src="./Document/Images/Title.png" alt="타이틀" width="500"/>
 
 ---
 
@@ -17,10 +17,32 @@
 - 각 유닛의 역할이 전투 양상에 자연스럽게 반영되도록 설계
 
 ### 2. 장비 기반 스킬 시스템
+<table>
+  <tr>
+    <td align="center">
+      <img src="./Document/Images/ItemSelect.png" alt="장비 선택" width="300"/><br/>
+      <sub>장비 선택 창과 스킬 설명</sub>
+    </td>
+  </tr>
+</table>
+
 - 장비 종류에 따라 서로 다른 스킬을 사용할 수 있도록 구현
 - 장비 선택이 전투 스타일 변화로 이어지도록 구성
 
 ### 3. 세트 효과 기반 스킬 업그레이드
+<table>
+  <tr>
+    <td align="center">
+      <img src="./Document/Gif/BeforeSkillUpgraded.gif" alt="before" width="350"/><br/>
+      <sub>세트 효과 적용 전 스킬 사용 모습</sub>
+    </td>
+    <td align="center">
+      <img src="./Document/Gif/AfterSkillUpgraded.gif" alt="after" width="350"/><br/>
+      <sub>세트 효과 적용 후 강화된 스킬 사용 모습</sub>
+    </td>
+  </tr>
+</table>
+
 - 특정 장비 조합을 통해 추가 효과 또는 스킬 강화가 가능하도록 설계
 - 단순 장비 착용을 넘어 조합의 재미를 느낄 수 있도록 구현
 
