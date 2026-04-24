@@ -1,5 +1,5 @@
 # 감자 원정대
-<img src="./Document/Images/Title.png" alt="타이틀" width="500"/>
+<img src="./Document/Images/Title.png" alt="타이틀" width="1200"/>
 
 ---
 
