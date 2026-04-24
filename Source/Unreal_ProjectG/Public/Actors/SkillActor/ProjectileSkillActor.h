@@ -23,6 +23,8 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+    virtual void SpawnFollowUpActor() override;
+
 private:
     void StartGrowthUpdateTimerIfNeeded();
     void StopGrowthUpdateTimer();
@@ -52,6 +54,9 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, Category = "SkillActor|Growth")
     float ElapsedGrowthTime = 0.0f; // 현재 성장 업데이트가 진행된 시간
+
+    UPROPERTY(BlueprintReadOnly, Category = "SkillActor|Growth")
+    float CurrentGrowthMultiplier = 1.0f; // 현재 성장 배율
 
 private:
     FTimerHandle GrowthUpdateTimerHandle;

@@ -177,7 +177,7 @@ void AGATargetActor_AOEGroundTrace::Tick(float DeltaSeconds)
             {
                 QueryParams.AddIgnoredActor(PrimaryPC->GetPawn());
             }
-            if (GetWorld()->LineTraceSingleByChannel(HitResult, WorldLocation, TraceEnd, ECC_Visibility))
+            if (GetWorld()->LineTraceSingleByChannel(HitResult, WorldLocation, TraceEnd, ECC_GameTraceChannel4))
             {
                 LastTouchLocation = HitResult.Location;
 

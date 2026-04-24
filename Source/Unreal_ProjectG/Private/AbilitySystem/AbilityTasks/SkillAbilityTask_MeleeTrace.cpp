@@ -19,6 +19,9 @@ namespace MeleeTraceConstants
     // 트레이스 반복 간격
     // 0.016 ≈ 60fps 기준 1프레임
     constexpr float TraceInterval = 0.016f;
+    // 반경 대비 이동량이 클수록 더 세밀하게 보간 추적
+    constexpr float SubStepDistanceScale = 0.5f;
+    constexpr int32 MaxTraceSubSteps = 4;
 }
 
 USkillAbilityTask_MeleeTrace* USkillAbilityTask_MeleeTrace::Create(UGameplayAbility* OwningAbility, const FSkillActionRow& ActionRow)
@@ -71,6 +74,7 @@ void USkillAbilityTask_MeleeTrace::OnTraceStartEventReceived(FGameplayEventData 
 {
     bIsTraceActive = true;
     HitActors.Empty();
+    const FHeroMeleeTraceConfig& Config = CachedActionRow.MeleeTraceConfig;
 
     // 무기 메시에서 초기 소켓 위치 가져오기
     if(IEquipmentsStorageInterface* EquipmentsStorageInterface = Cast<IEquipmentsStorageInterface>(GetAvatarActor()))
@@ -86,6 +90,13 @@ void USkillAbilityTask_MeleeTrace::OnTraceStartEventReceived(FGameplayEventData 
                 FName EndSocketName = TEXT("TraceEnd");
                 PreviousTraceStart = EquipmentsStorageComponent->CachedWeaponMeshComponent->GetSocketLocation(StartSocketName);
                 PreviousTraceEnd = EquipmentsStorageComponent->CachedWeaponMeshComponent->GetSocketLocation(EndSocketName);
+
+                // Previous/Current를 같은 기준으로 다루기 위해 시작 시점에도 EndOffset 반영
+                if (!FMath::IsNearlyZero(Config.TraceOffsetRange))
+                {
+                    const FVector InitialTraceDir = (PreviousTraceEnd - PreviousTraceStart).GetSafeNormal();
+                    PreviousTraceEnd += InitialTraceDir * Config.TraceOffsetRange;
+                }
             }
         }
     }
@@ -136,90 +147,98 @@ void USkillAbilityTask_MeleeTrace::ExecuteTrace()
                 }
 
                 EDrawDebugTrace::Type DebugTracePolicy = Config.bDrawDebugTrace ? EDrawDebugTrace::ForOneFrame : EDrawDebugTrace::None;
-
-                TArray<FHitResult> HitResults;
-                UKismetSystemLibrary::SphereTraceMultiForObjects(
-                    Avatar,
-                    CurrentTraceStart,   // 현재 프레임 시작점
-                    CurrentTraceEnd,     // 현재 프레임 끝점
-                    Config.Radius,
-                    { UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn) }, // 적 캐릭터만 충돌하도록 Pawn 채널 사용
-                    false,
-                    TArray<AActor*>({ Avatar }),
-                    DebugTracePolicy,
-                    HitResults,
-                    true,
-                    FLinearColor::Red
-                );
-
                 UPGGameplayAbility* PGAbility = Cast<UPGGameplayAbility>(Ability);
 
-                for (const FHitResult& HitResult : HitResults)
+                if (!PGAbility || Config.Effects.IsEmpty())
                 {
-                    AActor* HitActor = HitResult.GetActor();
+                    PreviousTraceStart = CurrentTraceStart;
+                    PreviousTraceEnd = CurrentTraceEnd;
+                    return;
+                }
 
-                    if (!HitActor) continue;
+                // 이전 프레임 -> 현재 프레임 구간을 보간해 다중 Sweep 실행
+                const float MaxSocketDelta = FMath::Max(
+                    FVector::Dist(PreviousTraceStart, CurrentTraceStart),
+                    FVector::Dist(PreviousTraceEnd, CurrentTraceEnd));
+                const float SubStepDistance = FMath::Max(Config.Radius * MeleeTraceConstants::SubStepDistanceScale, 1.f);
+                const int32 SubStepCount = FMath::Clamp(
+                    FMath::CeilToInt(MaxSocketDelta / SubStepDistance),
+                    1,
+                    MeleeTraceConstants::MaxTraceSubSteps);
 
-                    // 적군만 히트
-                    if (!IsValidTarget(HitActor)) continue;
+                bool bReachedMaxHit = false;
 
-                    // 중복 히트 방지
-                    if (HitActors.Contains(HitActor)) continue;
+                for (int32 StepIndex = 1; StepIndex <= SubStepCount; ++StepIndex)
+                {
+                    const float PrevAlpha = static_cast<float>(StepIndex - 1) / static_cast<float>(SubStepCount);
+                    const float CurrAlpha = static_cast<float>(StepIndex) / static_cast<float>(SubStepCount);
+                    const FVector SweepStart = FMath::Lerp(PreviousTraceStart, CurrentTraceStart, PrevAlpha);
+                    const FVector SweepEnd = FMath::Lerp(PreviousTraceEnd, CurrentTraceEnd, CurrAlpha);
 
-                    // MaxHit 체크
-                    if (HitActors.Num() >= Config.MaxHit) break;
+                    TArray<FHitResult> HitResults;
+                    UKismetSystemLibrary::SphereTraceMultiForObjects(
+                        Avatar,
+                        SweepStart,
+                        SweepEnd,
+                        Config.Radius,
+                        { UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn) }, // 적 캐릭터만 충돌하도록 Pawn 채널 사용
+                        false,
+                        TArray<AActor*>({ Avatar }),
+                        DebugTracePolicy,
+                        HitResults,
+                        true,
+                        FLinearColor::Red
+                    );
 
-                    // 효과 적용 전 유효성 체크
-                    if (!PGAbility || Config.Effects.IsEmpty()) return;
-                    
-                    // GE 스펙 핸들 생성 및 효과 적용
-                    for (const FEffectConfig& EffectConfig : Config.Effects)
+                    for (const FHitResult& HitResult : HitResults)
                     {
-                        FGameplayEffectSpecHandle SpecHandle = PGAbility->MakeOutgoingEffectSpecFromEffectConfig(EffectConfig);
-                        
-                        if (!SpecHandle.IsValid()) continue;
+                        AActor* HitActor = HitResult.GetActor();
 
-                        // 적용 전: ActorCue를 Spec에 주입
-                        const FGameplayEffectContextHandle CueContext = AddActorCueIntoSpecHandle(SpecHandle, EffectConfig);
+                        if (!HitActor) continue;
 
-                        const FActiveGameplayEffectHandle AppliedHandle = PGAbility->NativeApplyEffectSpecHandleToTarget(HitActor, SpecHandle);
+                        // 적군만 히트
+                        if (!IsValidTarget(HitActor)) continue;
 
-                        // Context를 사용한다면
-                        const FGameplayEffectContextHandle ContextToUse = CueContext.IsValid() ? CueContext : (SpecHandle.Data.IsValid() ? SpecHandle.Data->GetContext() : FGameplayEffectContextHandle());
+                        // 중복 히트 방지
+                        if (HitActors.Contains(HitActor)) continue;
 
-                        // 적용 후: StaticCue 실행
-                        ExecuteStaticCue(HitActor, EffectConfig, ContextToUse);
-                        HitActors.Add(HitActor);
-
-                        if (!bHitEventFlag)
+                        // MaxHit 체크
+                        if (HitActors.Num() >= Config.MaxHit)
                         {
-                            HitData->HitResult = HitResult;
-                            RuntimeTargetData.Add(HitData);
-                            EmitRuntimeEvent(PGGameplayTags::Event_Trigger_OnHit, RuntimeTargetData); // TODO:다른 이벤트와 혼용하지 않는지 확인
-                            bHitEventFlag = true;
+                            bReachedMaxHit = true;
+                            break;
+                        }
+
+                        // GE 스펙 핸들 생성 및 효과 적용
+                        for (const FEffectConfig& EffectConfig : Config.Effects)
+                        {
+                            FGameplayEffectSpecHandle SpecHandle = PGAbility->MakeOutgoingEffectSpecFromEffectConfig(EffectConfig);
+                            
+                            if (!SpecHandle.IsValid()) continue;
+
+                            // 적용 전: ActorCue를 Spec에 주입
+                            const FGameplayEffectContextHandle CueContext = AddActorCueIntoSpecHandle(SpecHandle, EffectConfig);
+
+                            const FActiveGameplayEffectHandle AppliedHandle = PGAbility->NativeApplyEffectSpecHandleToTarget(HitActor, SpecHandle);
+
+                            // Context를 사용한다면
+                            const FGameplayEffectContextHandle ContextToUse = CueContext.IsValid() ? CueContext : (SpecHandle.Data.IsValid() ? SpecHandle.Data->GetContext() : FGameplayEffectContextHandle());
+
+                            // 적용 후: StaticCue 실행
+                            ExecuteStaticCue(HitActor, EffectConfig, ContextToUse);
+                            HitActors.Add(HitActor);
+
+                            if (!bHitEventFlag)
+                            {
+                                HitData->HitResult = HitResult;
+                                RuntimeTargetData.Add(HitData);
+                                EmitRuntimeEvent(PGGameplayTags::Event_Trigger_OnHit, RuntimeTargetData); // TODO:다른 이벤트와 혼용하지 않는지 확인
+                                bHitEventFlag = true;
+                            }
                         }
                     }
 
-                    //TArray<FGameplayEffectSpecHandle> SpecHandles = 
-                    //    PGAbility->MakeOutgoingEffectSpecsFromEffectConfigs(Config.Effects);
-
-                    //for(const FGameplayEffectSpecHandle& SpecHandle : SpecHandles)
-                    //{
-                    //    if (SpecHandle.IsValid())
-                    //    {
-                    //        PGAbility->NativeApplyEffectSpecHandleToTarget(HitActor, SpecHandle);
-                    //        HitActors.Add(HitActor);
-
-                    //        if (!bHitEventFlag)
-                    //        {
-                    //            HitData->HitResult = HitResult;
-                    //            RuntimeTargetData.Add(HitData);
-
-                    //            EmitRuntimeEvent(PGGameplayTags::Event_Trigger_OnHit, RuntimeTargetData); // TODO:다른 이벤트와 혼용하지 않는지 확인
-                    //            bHitEventFlag = true;
-                    //        }
-                    //    }
-                    //}
+                    if (bReachedMaxHit) break;
                 }
                 PreviousTraceStart = CurrentTraceStart;
                 PreviousTraceEnd = CurrentTraceEnd;

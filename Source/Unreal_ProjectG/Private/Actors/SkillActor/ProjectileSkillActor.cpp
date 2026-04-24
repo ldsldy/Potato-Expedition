@@ -4,6 +4,7 @@
 #include "Actors/SkillActor/ProjectileSkillActor.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "TimerManager.h"
+#include "Types/PGDataTableStruct.h"
 
 AProjectileSkillActor::AProjectileSkillActor()
 {
@@ -41,6 +42,7 @@ void AProjectileSkillActor::BeginPlay()
 
     if (bEnableTimeGrowth)
     {
+        CurrentGrowthMultiplier = 1.f;
         StartGrowthUpdateTimerIfNeeded();
     }
 }
@@ -86,8 +88,8 @@ void AProjectileSkillActor::UpdateGrowthByTime()
 
     // 단일 소스: SkillActor 런타임 배율 사용
     SetRuntimeMultipliers(NewMultiplier, NewMultiplier);
-    //SetActorScale3D(BaseActorScale * GetRuntimeScaleMultiplier()); // 스케일은 나이아가라 문제로 제거
     RebuildEffectSpecsFromConfig();
+    CurrentGrowthMultiplier = NewMultiplier;
 
     if(Alpha >= 1.f)
     {
@@ -107,4 +109,51 @@ void AProjectileSkillActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     StopGrowthUpdateTimer();
     Super::EndPlay(EndPlayReason);
+}
+
+void AProjectileSkillActor::SpawnFollowUpActor()
+{
+    // 투사체는 후속 액털 스폰을 맞은 대상 위치에 스폰
+    if (Config.NextSpawn.ActorClass)
+    {
+        if (!Config.NextSpawn.ActorClass) return;
+
+        AActor* OwnerActor = GetOwner();
+        if (!OwnerActor || !GetWorld()) return;
+
+        FVector SpawnOffset = FVector::ZeroVector;
+        if (const FSpawnOffsetRow* Row = Config.NextSpawn.SpawnOffsetRow.GetRow<FSpawnOffsetRow>(TEXT("SpawnOffset")))
+        {
+            SpawnOffset = Row->SpawnOffset;
+        }
+
+        FVector BaseSpawnLocation = GetActorLocation();
+
+        // 만약 OverlappingTargets에 유효한 타겟이 있다면, [0]번 타겟 위치로 스폰 오프셋을 계산. 그렇지 않으면 현재 액터 위치 기준으로 계산
+        if (!OverlappingTargets.IsEmpty())
+        {
+            BaseSpawnLocation = OverlappingTargets[0].IsNull() ? BaseSpawnLocation : OverlappingTargets[0]->GetActorLocation();
+        }
+
+        const FTransform SpawnTransform(GetActorRotation(), BaseSpawnLocation + SpawnOffset);
+
+        ASkillActor* Spawned = GetWorld()->SpawnActorDeferred<ASkillActor>(
+            Config.NextSpawn.ActorClass,
+            SpawnTransform,
+            OwnerActor,
+            Cast<APawn>(OwnerActor),
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+
+        if (!Spawned) return;
+
+        FHeroSpawnableConfig FollowUpConfig = MakeSpawnableConfigFromFollowUp(Config.NextSpawn);
+
+
+        // 현재 배율을 후속 액터로 전달(후속이 Init에서 Spec 생성할 때 반영됨)
+        Spawned->SetOwner(OwnerActor);
+        Spawned->SetInstigator(Cast<APawn>(OwnerActor));
+        PropagateRuntimeMultipliersTo(Spawned);
+        Spawned->InitFromConfig(FollowUpConfig, CachedAbilityLevel);
+        Spawned->FinishSpawning(SpawnTransform);
+    }
 }

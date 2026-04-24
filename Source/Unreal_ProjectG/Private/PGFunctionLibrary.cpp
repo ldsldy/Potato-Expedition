@@ -24,11 +24,13 @@ UHeroCombatComponent* UPGFunctionLibrary::NativeGetCombatComponentFromActor(AAct
 {
     check(InActor);
 
+    // 인터페이스를 통해 액터 컴포너트를 가져오려는 시도
     if (IHeroCombatInterface* HeroCombatInterface = Cast<IHeroCombatInterface>(InActor))
     {
         return HeroCombatInterface->GetHeroCombatComponent();
     }
 
+    // 인터페이스가 구현되어 있지 않다면, 액터에서 직접 컴포넌트를 찾아보는 시도
     if (UHeroCombatComponent* HeroCombatComp = InActor->FindComponentByClass<UHeroCombatComponent>())
     {
         return HeroCombatComp;

@@ -85,6 +85,11 @@ protected:
     FORCEINLINE float GetRuntimeScaleMultiplier() const { return RuntimeScaleMultiplier; }
     
     void RebuildEffectSpecsFromConfig();
+    void PropagateRuntimeMultipliersTo(ASkillActor* TargetSkillActor) const;
+
+    // 후속 액터 스폰: Config.NextSpawn이 유효하면 해당 설정으로 액터 스폰
+    virtual void SpawnFollowUpActor();
+    FHeroSpawnableConfig MakeSpawnableConfigFromFollowUp(const FSkillActorFollowUpSpawnConfig& FollowUpConfig) const;
 
 private:
     // 충돌 이벤트 콜백
@@ -110,15 +115,10 @@ private:
     // 파괴 핸들러: 이벤트 호출 및 GA 이벤트 트리거, 후속 액터 스폰
     void HandlePreDestroy();
 
-    // 후속 액터 스폰: Config.NextSpawn이 유효하면 해당 설정으로 액터 스폰
-    void SpawnFollowUpActor();
-
     // 수동으로 겹치는 타겟 목록 갱신 (주로 장판에서 사용, TickInterval > 0인 경우)
     void RefreshOverlappingTargets();
 
-    FHeroSpawnableConfig MakeSpawnableConfigFromFollowUp(const FSkillActorFollowUpSpawnConfig& FollowUpConfig) const;
     TArray<FGameplayEffectSpecHandle> BuildEffectSpecsFromConfigs(const TArray<FEffectConfig>& EffectConfigs) const;
-
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "SkillActor|Components")
     TObjectPtr<USceneComponent> SceneRoot;

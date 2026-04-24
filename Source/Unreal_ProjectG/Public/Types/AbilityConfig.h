@@ -452,6 +452,6 @@ struct FHeroBuffConfig : public FAbilityConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "몽타주"))
     TObjectPtr<UAnimMontage> Montage = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "적용할 큐", Categories = "GameplayCue"))
-    FGameplayTagContainer AppliedCueTags;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (DisplayName = "디버그 모드"))
+    bool bDebugMode = false;
 };

@@ -15,6 +15,31 @@
 #include "PGFunctionLibrary.h"
 #include "PGGameplayTags.h"
 
+namespace BuffDebugConstants
+{
+    // 버프가 적용된 타겟을 디버그로 표시할 때, 우선순위에 따른 색상 그라데이션을 계산하는 헬퍼 함수
+    FColor GetPriorityGradientColor(const int32 Index, const int32 NumTargets)
+    {
+        if (NumTargets <= 1)
+        {
+            return FColor::Green;
+        }
+
+        const float Alpha = FMath::Clamp(
+            static_cast<float>(Index) / static_cast<float>(NumTargets - 1),
+            0.f,
+            1.f);
+
+        // 우선순위가 높을수록 녹색에 가깝고, 낮을수록 빨간색에 가까운 그라데이션 색상을 계산
+        const FLinearColor GradientColor = FLinearColor::LerpUsingHSV(
+            FLinearColor::Green,
+            FLinearColor::Red,
+            Alpha);
+
+        return GradientColor.ToFColor(true);
+    }
+}
+
 USkillAbilityTask_Buff* USkillAbilityTask_Buff::Create(
     UGameplayAbility* OwningAbility,
     const FSkillActionRow& ActionRow,
@@ -121,10 +146,16 @@ bool USkillAbilityTask_Buff::ApplyBuffOnce()
         return false;
     }
 
+    // CenterLocation을 기준으로 타겟들 수집
+    // 수집된 타겟들에게 버프 효과 적용
     TArray<AActor*> Targets;
     GatherTargets(CenterLocation, Targets);
     ApplyEffectsToTargets(Targets);
     bBuffApplied = true;
+
+
+    DebugDrawAppliedTargets(Targets);
+
     return true;
 }
 
@@ -223,9 +254,10 @@ void USkillAbilityTask_Buff::GatherTargets(const FVector& CenterLocation, TArray
         break;
 
     case EHeroBuffSelectRule::LowestHealthN:
+        // 체력 퍼센테이지가 낮은 순으로 오름차순 정렬
         OutTargets.Sort([this](const AActor& A, const AActor& B)
         {
-            return GetTargetHealth(&A) < GetTargetHealth(&B);
+            return ResolveTargetHealthPercentage(&A) < ResolveTargetHealthPercentage(&B);
         });
         break;
 
@@ -273,6 +305,7 @@ bool USkillAbilityTask_Buff::IsTargetAllowed(AActor* Candidate) const
 
 float USkillAbilityTask_Buff::GetTargetHealth(const AActor* Target) const
 {
+    // Target이 유효하지 않거나 ASC를 가져올 수 없는 경우 최대값을 반환하여 정렬 시 뒤로 가도록 함
     if (!Target)
     {
         return TNumericLimits<float>::Max();
@@ -285,6 +318,124 @@ float USkillAbilityTask_Buff::GetTargetHealth(const AActor* Target) const
     }
 
     return TargetASC->GetNumericAttribute(UPGCharacterAttributeSet::GetHealthAttribute());
+}
+
+float USkillAbilityTask_Buff::GetTargetMaxHealth(const AActor* Target) const
+{
+    // Target이 유효하지 않거나 ASC를 가져올 수 없는 경우 최솟값을 반환하여 정렬 시 뒤로 가도록 함
+    if (!Target)
+    {
+        return TNumericLimits<float>::Min();
+    }
+
+    UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(const_cast<AActor*>(Target));
+    if (!TargetASC)
+    {
+        return TNumericLimits<float>::Min();
+    }
+
+    return TargetASC->GetNumericAttribute(UPGCharacterAttributeSet::GetMaxHealthAttribute());
+}
+
+float USkillAbilityTask_Buff::ResolveTargetHealthPercentage(const AActor* Target) const
+{
+    const float Health = GetTargetHealth(Target);
+    const float MaxHealth = GetTargetMaxHealth(Target);
+    if (MaxHealth <= 0.f)
+    {
+        return 0.f;
+    }
+    return Health / MaxHealth;
+}
+
+void USkillAbilityTask_Buff::DebugDrawAppliedTargets(const TArray<AActor*>& Targets) const
+{
+#if UE_BUILD_SHIPPING || UE_BUILD_TEST
+    return;
+#else
+
+    const FHeroBuffConfig& Config = ActionRowData.BuffConfig;
+
+    if (!Config.bDebugMode)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    const FVector OwnerLocation = GetAvatarActor()->GetActorLocation();
+    const FVector OwnerDrawLocation = OwnerLocation + FVector(0.f, 0.f, 50.f);
+
+    switch (Config.SelectRule)
+    {
+        case EHeroBuffSelectRule::NearestN:
+        {
+            for (int32 TargetIndex = 0; TargetIndex < Targets.Num(); ++TargetIndex)
+            {
+                AActor* Target = Targets[TargetIndex];
+                if (!Target) continue;
+
+                const FVector TargetLocation = Target->GetActorLocation();
+                const FVector TargetDrawLocation = TargetLocation + FVector(0.f, 0.f, 50.f);
+                const float Distance = FVector::Dist(OwnerLocation, TargetLocation);
+                const FColor PriorityColor = BuffDebugConstants::GetPriorityGradientColor(TargetIndex, Targets.Num());
+                const FString DebugText = FString::Printf(
+                    TEXT("Applied Buff\nPriority: %d/%d\nDistance: %.1f"),
+                    TargetIndex + 1,
+                    Targets.Num(),
+                    Distance 
+                );
+                DrawDebugLine(World, OwnerDrawLocation, TargetDrawLocation, PriorityColor, false, 3, 0, 1.8f);
+                DrawDebugSphere(World, TargetDrawLocation, 35.f, 12, PriorityColor, false, 3, 0, 1.8f);
+                DrawDebugString(World, TargetDrawLocation + FVector(0.f, 0.f, 45.f), DebugText, nullptr, FColor::White, 3, false);
+            }
+            break;
+        }
+
+        case EHeroBuffSelectRule::LowestHealthN:
+        {
+            for (int32 TargetIndex = 0; TargetIndex < Targets.Num(); ++TargetIndex)
+            {
+                AActor* Target = Targets[TargetIndex];
+                if (!Target) continue;
+
+                const FVector TargetLocation = Target->GetActorLocation();
+                const FVector TargetDrawLocation = TargetLocation + FVector(0.f, 0.f, 50.f);
+                const float HealthPercentage = ResolveTargetHealthPercentage(Target) * 100.f;
+                const FColor PriorityColor = BuffDebugConstants::GetPriorityGradientColor(TargetIndex, Targets.Num());
+                const FString DebugText = FString::Printf(
+                    TEXT("Applied Buff\nPriority: %d/%d\nHealth: %.1f%%"),
+                    TargetIndex + 1,
+                    Targets.Num(),
+                    HealthPercentage
+                );
+                DrawDebugLine(World, OwnerDrawLocation, TargetDrawLocation, PriorityColor, false, 3, 0, 1.8f);
+                DrawDebugSphere(World, TargetDrawLocation, 35.f, 12, PriorityColor, false, 3, 0, 1.8f);
+                DrawDebugString(World, TargetDrawLocation + FVector(0.f, 0.f, 45.f), DebugText, nullptr, FColor::White, 3, false);
+            }
+            break;
+        }
+
+        case EHeroBuffSelectRule::AllInRange:
+        {
+            for (AActor* Target : Targets)
+            {
+                const FVector TargetLocation = Target->GetActorLocation();
+                const FVector TargetDrawLocation = TargetLocation + FVector(0.f, 0.f, 50.f);
+                DrawDebugLine(World, OwnerDrawLocation, TargetDrawLocation, FColor::Green, false, 3, 0, 1.8f);
+                DrawDebugSphere(World, TargetDrawLocation, 35.f, 12, FColor::Blue, false, 3, 0, 1.8f);
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+#endif
 }
 
 void USkillAbilityTask_Buff::ApplyEffectsToTargets(const TArray<AActor*>& Targets) const

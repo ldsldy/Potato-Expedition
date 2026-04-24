@@ -5,6 +5,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "TimerManager.h"
+#include "DrawDebugHelpers.h"
 #include "PGGameplayTags.h"
 #include "Character/PGCharacterBase.h"
 #include "Interfaces/HeroCombatInterface.h"
@@ -144,55 +145,62 @@ void UHeroCombatComponent::SyncCombatState()
     ApplyMovementPolicy();
 }
 
-void UHeroCombatComponent::RefreshCombatTickEnabled()
-{
-    // Combat Tick이 실행되어야 하는지 여부를 판단하여 Tick 활성화 상태를 갱신
-    const bool bShouldEnableTick = ShouldRunCombatTick();
-    if (IsComponentTickEnabled() != bShouldEnableTick)
+    // 현재 타깃은 가장 가까운 적으로 변경
+    CurrentTarget = FindNearestEnemy();
+    DebugCurrentTarget();
+
+    // 유효한 타깃이 없으면 틱을 종료하면서 캐릭터 회전을 Movement 방향으로 돌려놓음
+    // Auto 모드라면 항상 틱이 활성화 되어 있어야 하지만, Manual 모드에서는 타깃이 없을 때 틱을 비활성화하여 불필요한 연산을 줄임
+    if (!CurrentTarget.IsValid() && CombatMode == EHeroCombatMode::Manual)
     {
         SetComponentTickEnabled(bShouldEnableTick);
     }
 }
 
-bool UHeroCombatComponent::ShouldRunCombatTick() const
+void UHeroCombatComponent::DebugCurrentTarget() const
 {
-    // CombatMode가 None이 아니고 CurrentTarget이 있다면 True 반환, 그렇지 않으면 False 반환
-    return OwningCharacter
-        && CombatMode != EHeroCombatMode::None
-        && CurrentTarget.IsValid();
-}
-
-void UHeroCombatComponent::ApplyMovementPolicy()
-{
-    if (!OwningCharacter || CombatMode == EHeroCombatMode::None)
+#if UE_BUILD_SHIPPING || UE_BUILD_TEST
+    return;
+#else
+    if (!bEnableCurrentTargetDebug || !OwningCharacter)
     {
         return;
     }
 
-    UCharacterMovementComponent* MovementComponent = OwningCharacter->GetCharacterMovement();
-    if (!MovementComponent)
+    UWorld* World = GetWorld();
+    if (!World)
     {
         return;
     }
 
-    const bool bUseCombatMovement = CombatMode == EHeroCombatMode::Auto || CurrentTarget.IsValid();
+    const FVector OwnerLocation = OwningCharacter->GetActorLocation();
+    const FVector OwnerDrawLocation = OwnerLocation + FVector(0.f, 0.f, 50.f);
+    const float DebugDuration = FMath::Max(CurrentTargetDebugDuration, 0.01f);
 
-    MovementComponent->bOrientRotationToMovement = !bUseCombatMovement;
-    MovementComponent->MaxWalkSpeed = bUseCombatMovement ? 300.f : 500.f;
-}
-
-void UHeroCombatComponent::UpdateDetection()
-{
-    if (!OwningCharacter || CombatMode == EHeroCombatMode::None)
+    if (!CurrentTarget.IsValid())
     {
-        CurrentTarget = nullptr;
-        SyncCombatState();
+        const FVector ForwardEnd = OwnerDrawLocation + (OwningCharacter->GetActorForwardVector() * 100.f);
+        DrawDebugLine(World, OwnerDrawLocation, ForwardEnd, FColor::Red, false, DebugDuration, 0, 1.5f);
+        DrawDebugSphere(World, OwnerDrawLocation, 20.f, 12, FColor::Red, false, DebugDuration, 0, 1.5f);
+        DrawDebugString(World, OwnerDrawLocation + FVector(0.f, 0.f, 35.f), TEXT("CurrentTarget: None"), nullptr, FColor::Red, DebugDuration, false);
         return;
     }
 
-    CurrentTarget = FindNearestEnemy();
-    SyncCombatState();
+    const FVector TargetLocation = CurrentTarget->GetActorLocation();
+    const FVector TargetDrawLocation = TargetLocation + FVector(0.f, 0.f, 50.f);
+    const float Distance = FVector::Dist(OwnerLocation, TargetLocation);
+    const FString DebugText = FString::Printf(
+        TEXT("CurrentTarget: %s\nDistance: %.1f"),
+        *CurrentTarget->GetName(),
+        Distance
+    );
+
+    DrawDebugLine(World, OwnerDrawLocation, TargetDrawLocation, FColor::Yellow, false, DebugDuration, 0, 1.8f);
+    DrawDebugSphere(World, TargetDrawLocation, 35.f, 12, FColor::Green, false, DebugDuration, 0, 1.8f);
+    DrawDebugString(World, TargetDrawLocation + FVector(0.f, 0.f, 45.f), DebugText, nullptr, FColor::White, DebugDuration, false);
+#endif
 }
+
 void UHeroCombatComponent::HandleBasicAttack()
 {
     if(!OwningCharacter || !CurrentTarget.IsValid() || CombatMode == EHeroCombatMode::None) return;

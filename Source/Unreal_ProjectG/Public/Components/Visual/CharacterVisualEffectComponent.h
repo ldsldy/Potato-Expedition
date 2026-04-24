@@ -39,16 +39,20 @@ public:
     UFUNCTION(BlueprintCallable)
     void InitializeMaterialCachedIfNeeded();
 
+    // 히트 리액트 효과 활성화/비활성화
     UFUNCTION(BlueprintCallable)
     void SetHitReactEnabled(bool bEnabled);
 
+    // AOE 하이라이트 효과 활성화/비활성화
     UFUNCTION(BlueprintCallable)
     void SetAOEHighlightEnabled(bool bEnabled);
 
+    // 모든 하이라이트 효과 초기 상태로 리셋
     UFUNCTION(BlueprintCallable)
     void ResetVisualEffectState();
 
 private:
+    // 메시의 머티리얼 하이라이트 상태를 업데이트
     void RefreshVisualState();
 
 private:

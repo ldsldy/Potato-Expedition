@@ -37,11 +37,17 @@ private:
     void OnBuffEventReceived(FGameplayEventData Payload);
 
     bool ResolveCenterLocation(FVector& OutCenter) const;
-    void GatherTargets(const FVector& CenterLocation, TArray<AActor*>& OutTargets) const;
     bool IsTargetAllowed(AActor* Candidate) const;
-    float GetTargetHealth(const AActor* Target) const;
     void ApplyEffectsToTargets(const TArray<AActor*>& Targets) const;
 
+    // ESkillTargetPolicy 수집 방식별로 타겟 수집을 담당하는 헬퍼 함수들
+    void GatherTargets(const FVector& CenterLocation, TArray<AActor*>& OutTargets) const;
+    float GetTargetHealth(const AActor* Target) const;
+    float GetTargetMaxHealth(const AActor* Target) const;
+    float ResolveTargetHealthPercentage(const AActor* Target) const;
+
+    // 버프를 적용한 타깃들을 확인하기 위한 디버그 함수
+    void DebugDrawAppliedTargets(const TArray<AActor*>& Targets) const;
 private:
     FSkillActionRow ActionRowData;
     FGameplayAbilityTargetDataHandle TriggerTargetData;

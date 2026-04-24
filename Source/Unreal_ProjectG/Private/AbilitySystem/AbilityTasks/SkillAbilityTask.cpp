@@ -26,7 +26,7 @@ namespace SkillCueHelper
     {
         if (!InContext.IsValid()) return FGameplayEffectContextHandle();
 
-        FGameplayEffectContextHandle NewContext = InContext.Duplicate();
+        FGameplayEffectContextHandle NewContext = InContext.Duplicate(); // 깊은 복사
         if (!NewContext.IsValid()) return FGameplayEffectContextHandle();
 
         // 전달할 변형 태그가 없으면 복제본만 반환

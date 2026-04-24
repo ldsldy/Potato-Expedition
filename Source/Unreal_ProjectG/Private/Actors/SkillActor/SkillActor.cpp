@@ -123,6 +123,7 @@ void ASkillActor::OnSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent,
     }
     else
     {
+        OverlappingTargets.AddUnique(OtherActor);
         HandleInstantEffects(OtherActor);
     }
 }
@@ -325,7 +326,7 @@ void ASkillActor::SpawnFollowUpActor()
     // 현재 배율을 후속 액터로 전달(후속이 Init에서 Spec 생성할 때 반영됨)
     Spawned->SetOwner(OwnerActor);
     Spawned->SetInstigator(Cast<APawn>(OwnerActor));
-    Spawned->SetRuntimeMultipliers(RuntimeScaleMultiplier, RuntimeEffectMultiplier);
+    PropagateRuntimeMultipliersTo(Spawned);
     Spawned->InitFromConfig(FollowUpConfig, CachedAbilityLevel);
     Spawned->FinishSpawning(SpawnTransform);
 }
@@ -358,6 +359,16 @@ void ASkillActor::SetRuntimeMultipliers(float InScaleMultiplier, float InEffectM
 {
     RuntimeScaleMultiplier = FMath::Max(0.f, InScaleMultiplier);
     RuntimeEffectMultiplier = FMath::Max(0.f, InEffectMultiplier);
+}
+
+void ASkillActor::PropagateRuntimeMultipliersTo(ASkillActor* TargetSkillActor) const
+{
+    if (!TargetSkillActor)
+    {
+        return;
+    }
+
+    TargetSkillActor->SetRuntimeMultipliers(RuntimeScaleMultiplier, RuntimeEffectMultiplier);
 }
 
 
