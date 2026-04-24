@@ -7,13 +7,183 @@
 #include "Components/Combat/HeroCombatComponent.h"
 #include "AbilitySystemComponent.h"
 #include "DataAssets/Ability/DataAsset_HeroSkillData.h"
+#include "DataAssets/Ability/DataAsset_SkillVisualData.h"
 #include "AbilitySystem/Effects/GEffect_Cooldown.h"
+#include "Character/Unit/SubSystem/PGObjectPoolSubsystem.h"
 #include "PGFunctionLibrary.h"
 #include "PGGameplayTags.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundBase.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPGHeroSkillAbility, Log, All);
 
 UPGHeroSkillGameplayAbility::UPGHeroSkillGameplayAbility()
 {
-    InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerExecution;
+    InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+}
+
+void UPGHeroSkillGameplayAbility::OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
+{
+    Super::OnGiveAbility(ActorInfo, Spec);
+
+    CachedMainActionSequence.Reset();
+
+    SkillData = Cast<UDataAsset_HeroSkillData>(Spec.SourceObject.Get());
+    if (!SkillData)
+    {
+        return;
+    }
+
+    const UAbilitySystemComponent* ASC = ActorInfo && ActorInfo->AbilitySystemComponent.IsValid()
+        ? ActorInfo->AbilitySystemComponent.Get()
+        : nullptr;
+
+    if (ASC)
+    {
+        SkillData->BuildRuntimeActionSequence(ASC, FMath::Max(1, Spec.Level), CachedMainActionSequence);
+    }
+
+    if (CachedMainActionSequence.IsEmpty())
+    {
+        CachedMainActionSequence = SkillData->ActionSequence;
+    }
+
+    for (const FSkillActionRow& ActionRow : CachedMainActionSequence)
+    {
+        PreloadVisualAssetsFromAction(ActionRow);
+    }
+
+    UE_LOG(
+        LogPGHeroSkillAbility,
+        Log,
+        TEXT("[OnGiveAbility] Ability=%s SpecLevel=%d MainActionCount=%d WarmUpCount=%d"),
+        *GetNameSafe(this),
+        Spec.Level,
+        CachedMainActionSequence.Num(),
+        SpawnActorWarmUpCount);
+
+    PrewarmSpawnActorPools(CachedMainActionSequence, ActorInfo);
+}
+
+void UPGHeroSkillGameplayAbility::PreloadSkillVisualAsset(const UDataAsset_SkillVisualData* VisualAsset) const
+{
+    if (!VisualAsset)
+    {
+        return;
+    }
+
+    VisualAsset->ProjectileVFX.LoadSynchronous();
+    VisualAsset->ProjectileSFX.LoadSynchronous();
+    VisualAsset->HitVFX.LoadSynchronous();
+    VisualAsset->HitSFX.LoadSynchronous();
+    VisualAsset->ImpactVFX.LoadSynchronous();
+    VisualAsset->ImpactSFX.LoadSynchronous();
+    VisualAsset->PersistentVFX.LoadSynchronous();
+    VisualAsset->PersistentSFX.LoadSynchronous();
+}
+
+void UPGHeroSkillGameplayAbility::PreloadVisualAssetsFromAction(const FSkillActionRow& ActionRow) const
+{
+    if (ActionRow.ActionType != ESkillActionType::SpawnActor)
+    {
+        return;
+    }
+
+    PreloadSkillVisualAsset(ActionRow.SpawnableConfig.VisualAsset);
+    PreloadSkillVisualAsset(ActionRow.SpawnableConfig.NextSpawn.VisualAsset);
+}
+
+void UPGHeroSkillGameplayAbility::PrewarmSpawnActorPools(const TArray<FSkillActionRow>& ActionRows, const FGameplayAbilityActorInfo* ActorInfo) const
+{
+    if (SpawnActorWarmUpCount <= 0)
+    {
+        UE_LOG(
+            LogPGHeroSkillAbility,
+            Log,
+            TEXT("[PrewarmSpawnActorPools] Skip. Ability=%s WarmUpCount=%d"),
+            *GetNameSafe(this),
+            SpawnActorWarmUpCount);
+        return;
+    }
+
+    UWorld* World = ActorInfo && ActorInfo->AvatarActor.IsValid() ? ActorInfo->AvatarActor->GetWorld() : GetWorld();
+    if (!World)
+    {
+        UE_LOG(LogPGHeroSkillAbility, Warning, TEXT("[PrewarmSpawnActorPools] No valid world. Ability=%s"), *GetNameSafe(this));
+        return;
+    }
+
+    UPGObjectPoolSubsystem* PoolSubsystem = World->GetSubsystem<UPGObjectPoolSubsystem>();
+    if (!PoolSubsystem)
+    {
+        UE_LOG(LogPGHeroSkillAbility, Warning, TEXT("[PrewarmSpawnActorPools] No pool subsystem. Ability=%s"), *GetNameSafe(this));
+        return;
+    }
+
+    TSet<UClass*> ClassesToWarmup;
+    for (const FSkillActionRow& ActionRow : ActionRows)
+    {
+        if (ActionRow.ActionType != ESkillActionType::SpawnActor)
+        {
+            continue;
+        }
+
+        if (UClass* SpawnClass = ActionRow.SpawnableConfig.ActorClass)
+        {
+            ClassesToWarmup.Add(SpawnClass);
+        }
+        else
+        {
+            UE_LOG(
+                LogPGHeroSkillAbility,
+                Warning,
+                TEXT("[PrewarmSpawnActorPools] Missing ActorClass. Ability=%s ActionID=%s"),
+                *GetNameSafe(this),
+                *ActionRow.ActionID.ToString());
+        }
+
+        if (UClass* NextSpawnClass = ActionRow.SpawnableConfig.NextSpawn.ActorClass)
+        {
+            ClassesToWarmup.Add(NextSpawnClass);
+        }
+        else if (ActionRow.SpawnableConfig.NextSpawn.ActorClass != nullptr)
+        {
+            UE_LOG(
+                LogPGHeroSkillAbility,
+                Warning,
+                TEXT("[PrewarmSpawnActorPools] NextSpawn ActorClass unresolved. Ability=%s ActionID=%s"),
+                *GetNameSafe(this),
+                *ActionRow.ActionID.ToString());
+        }
+        else if (ActionRow.SpawnableConfig.NextSpawn.ActorClass != nullptr)
+        {
+            UE_LOG(
+                LogPGHeroSkillAbility,
+                Warning,
+                TEXT("[PrewarmSpawnActorPools] NextSpawn ActorClass unresolved. Ability=%s ActionID=%s"),
+                *GetNameSafe(this),
+                *ActionRow.ActionID.ToString());
+        }
+    }
+
+    UE_LOG(
+        LogPGHeroSkillAbility,
+        Log,
+        TEXT("[PrewarmSpawnActorPools] Ability=%s UniqueSpawnClasses=%d WarmEach=%d"),
+        *GetNameSafe(this),
+        ClassesToWarmup.Num(),
+        SpawnActorWarmUpCount);
+
+    for (UClass* SpawnClass : ClassesToWarmup)
+    {
+        UE_LOG(
+            LogPGHeroSkillAbility,
+            Log,
+            TEXT("[PrewarmSpawnActorPools] Prewarm Class=%s Count=%d"),
+            *GetNameSafe(SpawnClass),
+            SpawnActorWarmUpCount);
+        PoolSubsystem->PrewarmPool(SpawnClass, SpawnActorWarmUpCount);
+    }
 }
 
 void UPGHeroSkillGameplayAbility::ActivateAbility(
@@ -35,18 +205,24 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
     // 어빌리티 변수 초기화
     bCommittedThisActivation = false;
 
-    SkillData = Cast<UDataAsset_HeroSkillData>(GetCurrentSourceObject());
-    if (!SkillData || SkillData->MainSequence.IsEmpty())
+    UDataAsset_HeroSkillData* ActiveSkillData = SkillData.Get();
+    if (!ActiveSkillData)
+    {
+        ActiveSkillData = Cast<UDataAsset_HeroSkillData>(GetCurrentSourceObject());
+        SkillData = ActiveSkillData;
+    }
+
+    if (!ActiveSkillData || ActiveSkillData->ActionSequence.IsEmpty())
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
 
-    RuntimeActionSequence.Reset();
+    RuntimeActionSequence = CachedMainActionSequence;
     bBlockedMoveInputThisActivation = false;
 
     // 풀바디 모션인 경우 이동 입력 차단 태그 추가
-    if (SkillData->BodyMode == EHeroSkillBodyMode::FullBody)
+    if (ActiveSkillData->BodyMode == EHeroSkillBodyMode::FullBody)
     {
         if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
         {
@@ -56,14 +232,22 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
     }
     //==============================================================================
 
-    if (const UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+    if (RuntimeActionSequence.IsEmpty())
     {
-        SkillData->BuildRuntimeActionSequence(ASC, GetAbilityLevel(), RuntimeActionSequence);
+        if (const UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+        {
+            ActiveSkillData->BuildRuntimeActionSequence(ASC, GetAbilityLevel(), RuntimeActionSequence);
+        }
     }
 
     if (RuntimeActionSequence.IsEmpty())
     {
-        RuntimeActionSequence = SkillData->MainSequence;
+        RuntimeActionSequence = ActiveSkillData->ActionSequence;
+    }
+
+    if (CachedMainActionSequence.IsEmpty() && !RuntimeActionSequence.IsEmpty())
+    {
+        CachedMainActionSequence = RuntimeActionSequence;
     }
 
     if (RuntimeActionSequence.IsEmpty())
@@ -286,7 +470,6 @@ void UPGHeroSkillGameplayAbility::EndAbility(const FGameplayAbilitySpecHandle Ha
         }
     }
 
-    SkillData = nullptr;
     CurrentActionIndex = 0;
     bAutoMode = false;
     bCommittedThisActivation = false;

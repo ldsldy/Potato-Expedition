@@ -14,6 +14,8 @@ enum class EHeroSkillType : uint8
     BasicAttack     UMETA(DisplayName = "기본 공격"),
 };
 
+class UDataAsset_SkillVisualData;
+
 
 /*
 * 히어로 스킬 어빌리티 클래스
@@ -30,6 +32,8 @@ public:
     UPGHeroSkillGameplayAbility();
 
 protected:
+    virtual void OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec) override;
+
     virtual void ActivateAbility(
         const FGameplayAbilitySpecHandle Handle,
         const FGameplayAbilityActorInfo* ActorInfo,
@@ -52,6 +56,9 @@ private:
     const FGameplayAbilitySpec* ResolveAbilitySpec(
         const FGameplayAbilitySpecHandle& Handle = FGameplayAbilitySpecHandle(),
         const FGameplayAbilityActorInfo* ActorInfo = nullptr) const;
+    void PreloadSkillVisualAsset(const UDataAsset_SkillVisualData* VisualAsset) const;
+    void PreloadVisualAssetsFromAction(const FSkillActionRow& ActionRow) const;
+    void PrewarmSpawnActorPools(const TArray<FSkillActionRow>& ActionRows, const FGameplayAbilityActorInfo* ActorInfo) const;
 
     void ExecuteNextAction();
 
@@ -86,7 +93,13 @@ private:
     TObjectPtr<UDataAsset_HeroSkillData> SkillData = nullptr;
 
     UPROPERTY()
+    TArray<FSkillActionRow> CachedMainActionSequence;
+
+    UPROPERTY()
     TArray<FSkillActionRow> RuntimeActionSequence;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Skill|Pooling", meta = (ClampMin = "0"))
+    int32 SpawnActorWarmUpCount = 8;
 
     bool bAutoMode = false;
 

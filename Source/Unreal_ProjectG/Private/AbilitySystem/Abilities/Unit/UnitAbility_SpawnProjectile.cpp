@@ -14,7 +14,7 @@ void UUnitAbility_SpawnProjectile::OnGiveAbility(const FGameplayAbilityActorInfo
 {
     Super::OnGiveAbility(ActorInfo, Spec);
 
-    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(GetCurrentAbilitySpec()->SourceObject.Get());
+    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(Spec.SourceObject.Get());
     if (DataAsset)
     {
         const FUnitSpawnProjectileAbilityConfig* Config = DataAsset->AbilityEntry.AbilityConfig.GetPtr<FUnitSpawnProjectileAbilityConfig>();
@@ -23,19 +23,31 @@ void UUnitAbility_SpawnProjectile::OnGiveAbility(const FGameplayAbilityActorInfo
             UnitSpawnProjectileConfig = *Config;
         }
     }
-}
 
-void UUnitAbility_SpawnProjectile::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
-{
-    //==============================================
-// FUnitSpawnProjectileAbilityConfig의 SoftPtr 로드
     UnitSpawnProjectileConfig.SpawnedProjectileClass.LoadSynchronous();
     for (TSoftObjectPtr<UAnimMontage>& Montage : UnitSpawnProjectileConfig.SpawnProjectileMontages)
     {
         Montage.LoadSynchronous();
     }
-    //==============================================
 
+    if (PoolPrewarmCount > 0)
+    {
+        UWorld* World = ActorInfo && ActorInfo->AvatarActor.IsValid() ? ActorInfo->AvatarActor->GetWorld() : GetWorld();
+        if (World)
+        {
+            if (UPGObjectPoolSubsystem* PoolSubsystem = World->GetSubsystem<UPGObjectPoolSubsystem>())
+            {
+                if (UClass* ProjectileClass = UnitSpawnProjectileConfig.SpawnedProjectileClass.Get())
+                {
+                    PoolSubsystem->PrewarmPool(ProjectileClass, PoolPrewarmCount);
+                }
+            }
+        }
+    }
+}
+
+void UUnitAbility_SpawnProjectile::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+{
     checkf(UnitSpawnProjectileConfig.SpawnProjectileMontages.Num() > 0, TEXT("ProjectileAttackMontage가 비어있습니다!"));
 
     // 램덤하게 하나의 몽타주 선택

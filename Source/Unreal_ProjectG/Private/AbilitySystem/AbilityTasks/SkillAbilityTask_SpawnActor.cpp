@@ -13,6 +13,9 @@
 #include "PGFunctionLibrary.h"
 #include "PGGameplayTags.h"
 #include "Types/PGDataTableStruct.h"
+#include "Character/Unit/SubSystem/PGObjectPoolSubsystem.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogSkillSpawnTask, Log, All);
 
 namespace SkillTaskConstants
 {
@@ -387,7 +390,44 @@ void USkillAbilityTask_SpawnActor::SpawnActorAtLocation(const FVector& Location,
 
     const FTransform SpawnTransform(FinalRotation, FinalLocation + RotatedOffset);
 
-    ASkillActor* Spawned = GetWorld()->SpawnActorDeferred<ASkillActor>(
+    UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>();
+    ASkillActor* Spawned = nullptr;
+
+    if (PoolSubsystem)
+    {
+        Spawned = Cast<ASkillActor>(PoolSubsystem->TryGetPooledActor(Config.ActorClass, SpawnTransform));
+    }
+
+    if (Spawned)
+    {
+        UE_LOG(
+            LogSkillSpawnTask,
+            Log,
+            TEXT("[SpawnActorAtLocation] POOLED Class=%s Actor=%s Owner=%s SpawnLocation=%s"),
+            *GetNameSafe(Config.ActorClass.Get()),
+            *GetNameSafe(Spawned),
+            *GetNameSafe(AvatarActor),
+            *SpawnTransform.GetLocation().ToCompactString());
+
+        Spawned->SetOwner(AvatarActor);
+        Spawned->SetInstigator(Cast<APawn>(AvatarActor));
+        Spawned->InitFromConfig(Config, Ability->GetAbilityLevel());
+        Spawned->OnActivatedFromPool();
+        bActorSpawned = true;
+
+        EmitRuntimeEvent(PGGameplayTags::Event_Trigger_OnCommit, FGameplayAbilityTargetDataHandle());
+        return;
+    }
+
+    UE_LOG(
+        LogSkillSpawnTask,
+        Log,
+        TEXT("[SpawnActorAtLocation] FALLBACK_DEFERRED_SPAWN Class=%s Owner=%s SpawnLocation=%s"),
+        *GetNameSafe(Config.ActorClass.Get()),
+        *GetNameSafe(AvatarActor),
+        *SpawnTransform.GetLocation().ToCompactString());
+
+    Spawned = GetWorld()->SpawnActorDeferred<ASkillActor>(
         Config.ActorClass,
         SpawnTransform,
         AvatarActor,
@@ -396,15 +436,33 @@ void USkillAbilityTask_SpawnActor::SpawnActorAtLocation(const FVector& Location,
 
     if (!Spawned)
     {
+        UE_LOG(
+            LogSkillSpawnTask,
+            Warning,
+            TEXT("[SpawnActorAtLocation] SPAWN_FAILED Class=%s Owner=%s SpawnLocation=%s"),
+            *GetNameSafe(Config.ActorClass.Get()),
+            *GetNameSafe(AvatarActor),
+            *SpawnTransform.GetLocation().ToCompactString());
         OnCancelled.Broadcast({});
         EndTask();
         return;
     }
+
+    UE_LOG(
+        LogSkillSpawnTask,
+        Log,
+        TEXT("[SpawnActorAtLocation] DEFERRED_SPAWNED Class=%s Actor=%s Owner=%s SpawnLocation=%s"),
+        *GetNameSafe(Config.ActorClass.Get()),
+        *GetNameSafe(Spawned),
+        *GetNameSafe(AvatarActor),
+        *SpawnTransform.GetLocation().ToCompactString());
+
     Spawned->SetOwner(AvatarActor);
     Spawned->SetInstigator(Cast<APawn>(AvatarActor));
 
     Spawned->InitFromConfig(Config, Ability->GetAbilityLevel());
     Spawned->FinishSpawning(SpawnTransform);
+    Spawned->OnActivatedFromPool();
     bActorSpawned = true;
 
     EmitRuntimeEvent(PGGameplayTags::Event_Trigger_OnCommit, FGameplayAbilityTargetDataHandle());

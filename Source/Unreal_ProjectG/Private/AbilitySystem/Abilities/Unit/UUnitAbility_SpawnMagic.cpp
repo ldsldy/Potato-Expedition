@@ -12,7 +12,7 @@ void UUnitAbility_SpawnMagic::OnGiveAbility(const FGameplayAbilityActorInfo* Act
 {
     Super::OnGiveAbility(ActorInfo, Spec);
 
-    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(GetCurrentAbilitySpec()->SourceObject.Get());
+    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(Spec.SourceObject.Get());
     if (DataAsset)
     {
         // 구조체 타입을 FUnitSpawnMagicAbilityConfig로 받음
@@ -22,17 +22,31 @@ void UUnitAbility_SpawnMagic::OnGiveAbility(const FGameplayAbilityActorInfo* Act
             UnitSpawnMagicConfig = *Config;
         } 
     }
-}
 
-void UUnitAbility_SpawnMagic::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
-{
-    // SoftPtr 동기 로드
     UnitSpawnMagicConfig.SpawnedMagicClass.LoadSynchronous();
     for (TSoftObjectPtr<UAnimMontage>& Montage : UnitSpawnMagicConfig.SpawnMagicMontages)
     {
         Montage.LoadSynchronous();
     }
 
+    if (PoolPrewarmCount > 0)
+    {
+        UWorld* World = ActorInfo && ActorInfo->AvatarActor.IsValid() ? ActorInfo->AvatarActor->GetWorld() : GetWorld();
+        if (World)
+        {
+            if (UPGObjectPoolSubsystem* PoolSubsystem = World->GetSubsystem<UPGObjectPoolSubsystem>())
+            {
+                if (UClass* MagicClass = UnitSpawnMagicConfig.SpawnedMagicClass.Get())
+                {
+                    PoolSubsystem->PrewarmPool(MagicClass, PoolPrewarmCount);
+                }
+            }
+        }
+    }
+}
+
+void UUnitAbility_SpawnMagic::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+{
     checkf(UnitSpawnMagicConfig.SpawnMagicMontages.Num() > 0, TEXT("SpawnMagicMontages가 비어있습니다!"));
 
     // 랜덤 몽타주 선택 및 재생

@@ -62,6 +62,10 @@ void APGProjectileBase::BeginPlay()
 // --- [풀링: 창고에서 꺼낼 때 초기화 로직] ---
 void APGProjectileBase::OnActivatedFromPool_Implementation()
 {
+    SetActorHiddenInGame(false);
+    SetActorEnableCollision(true);
+    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
+
     // 1. 이동 속도 초기화 (다시 앞으로 날아가게 함)
     if (ProjectileMovementComponent)
     {
@@ -85,7 +89,10 @@ void APGProjectileBase::OnActivatedFromPool_Implementation()
         }
     }
 
-    SetActorHiddenInGame(false);
+    if (ProjectileNiagaraComponent)
+    {
+        ProjectileNiagaraComponent->Activate(true);
+    }
 
     // 3. 수명(LifeSpan) 타이머 작동: 시간이 다 되면 풀로 반납
     GetWorld()->GetTimerManager().SetTimer(LifeSpanTimerHandle, this, &APGProjectileBase::DeactivateAndReturnToPool, ProjectileSpan, false);
@@ -97,20 +104,24 @@ void APGProjectileBase::OnReturnedToPool_Implementation()
     // 이동 멈추기, 콜리전 끄기, 타이머 해제
     if (ProjectileMovementComponent) ProjectileMovementComponent->Deactivate();
     if (ProjectileCollisionComponent) ProjectileCollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    if (ProjectileNiagaraComponent) ProjectileNiagaraComponent->Deactivate();
     GetWorld()->GetTimerManager().ClearTimer(LifeSpanTimerHandle);
 
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
     SetActorHiddenInGame(true);
 }
 
 // 풀 반납 헬퍼 함수
 void APGProjectileBase::DeactivateAndReturnToPool()
 {
-    OnReturnedToPool(); // 블루프린트 비활성화 이벤트 실행
-
     if (UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>())
     {
         PoolSubsystem->ReturnActorToPool(this);
+        return;
     }
+
+    OnReturnedToPool(); // fallback
 }
 
 void APGProjectileBase::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)

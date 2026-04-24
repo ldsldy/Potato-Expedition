@@ -21,6 +21,8 @@ public:
     virtual void InitFromConfig(const FHeroSpawnableConfig& InConfig, int32 InAbilityLevel = 1) override;
 
 protected:
+    virtual void OnActivatedFromPool_Implementation() override;
+    virtual void OnReturnedToPool_Implementation() override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 

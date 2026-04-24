@@ -29,4 +29,7 @@ protected:
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Projectile Attack")
     FUnitSpawnProjectileAbilityConfig UnitSpawnProjectileConfig;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability|Projectile Attack", meta = (ClampMin = "0"))
+    int32 PoolPrewarmCount = 12;
 };

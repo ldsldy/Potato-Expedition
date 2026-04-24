@@ -28,4 +28,7 @@ protected:
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Spawn Actor")
     FUnitSpawnActorAbilityConfig UnitSpawnActorConfig;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability|Spawn Actor", meta = (ClampMin = "0"))
+    int32 PoolPrewarmCount = 5;
 };

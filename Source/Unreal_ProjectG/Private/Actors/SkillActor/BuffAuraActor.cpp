@@ -34,7 +34,18 @@ void ABuffAuraActor::BeginPlay()
 {
     Super::BeginPlay();
 
+    CollisionComponent->OnComponentBeginOverlap.RemoveAll(this);
+    CollisionComponent->OnComponentEndOverlap.RemoveAll(this);
+    CollisionComponent->OnComponentBeginOverlap.AddDynamic(this, &ABuffAuraActor::OnAuraBeginOverlap);
+    CollisionComponent->OnComponentEndOverlap.AddDynamic(this, &ABuffAuraActor::OnAuraEndOverlap);
+}
+
+void ABuffAuraActor::OnActivatedFromPool_Implementation()
+{
+    Super::OnActivatedFromPool_Implementation();
+
     GetWorldTimerManager().ClearTimer(TickEffectTimerHandle);
+    ActiveAuraEffectsByTarget.Empty();
 
     CollisionComponent->OnComponentBeginOverlap.RemoveAll(this);
     CollisionComponent->OnComponentEndOverlap.RemoveAll(this);
@@ -63,6 +74,14 @@ void ABuffAuraActor::BeginPlay()
             ApplyAuraToTarget(OverlappedActor);
         }
     }
+}
+
+void ABuffAuraActor::OnReturnedToPool_Implementation()
+{
+    RemoveAllAuraEffects();
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    Super::OnReturnedToPool_Implementation();
 }
 
 void ABuffAuraActor::EndPlay(const EEndPlayReason::Type EndPlayReason)

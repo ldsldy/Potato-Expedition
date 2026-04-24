@@ -3,53 +3,179 @@
 
 #include "Character/Unit/SubSystem/PGObjectPoolSubsystem.h"
 
-AActor* UPGObjectPoolSubsystem::GetActorFromPool(TSubclassOf<AActor> ActorClass, const FTransform& SpawnTransform)
+DEFINE_LOG_CATEGORY_STATIC(LogPGPooling, Log, All);
+
+namespace PGObjectPoolSubsystemInternal
 {
-    if (!ActorClass) return nullptr;
+    static const FName ReturnedToPoolFuncName(TEXT("OnReturnedToPool"));
+
+    static void SetActorToPooledState(AActor* Actor)
+    {
+        if (!IsValid(Actor))
+        {
+            return;
+        }
+
+        if (UFunction* ReturnedFunc = Actor->FindFunction(ReturnedToPoolFuncName))
+        {
+            Actor->ProcessEvent(ReturnedFunc, nullptr);
+        }
+
+        // 함수 구현 유무와 관계없이, 풀 상태는 최종적으로 비활성화를 강제한다.
+        Actor->SetActorHiddenInGame(true);
+        Actor->SetActorEnableCollision(false);
+        Actor->SetActorTickEnabled(false);
+    }
+}
+
+AActor* UPGObjectPoolSubsystem::TryGetPooledActor(TSubclassOf<AActor> ActorClass, const FTransform& SpawnTransform)
+{
+    if (!ActorClass)
+    {
+        UE_LOG(LogPGPooling, Warning, TEXT("[TryGetPooledActor] Invalid ActorClass."));
+        return nullptr;
+    }
 
     TArray<AActor*>& Pool = ActorPool.FindOrAdd(ActorClass).Actors;
+    const int32 InitialPoolSize = Pool.Num();
+    int32 InvalidDiscardedCount = 0;
 
-    // 1. 풀에 남은 액터가 있다면 꺼내서 재사용
     while (Pool.Num() > 0)
     {
         AActor* PooledActor = Pool.Pop();
-
-        // 널 포인터(중간에 파괴된 액터) 방어 로직
-        if (IsValid(PooledActor))
+        if (!IsValid(PooledActor))
         {
-            // 위치와 회전값만 원하는 곳으로 이동
-            //숨김 해제, 콜리전 켜기 등은 액터 내부의 OnActivatedFromPool에서 알아서 진행
-            PooledActor->SetActorTransform(SpawnTransform);
-
-            return PooledActor;
+            ++InvalidDiscardedCount;
+            continue;
         }
+
+        PooledActor->SetActorTransform(SpawnTransform);
+        UE_LOG(
+            LogPGPooling,
+            Log,
+            TEXT("[TryGetPooledActor] HIT Class=%s Actor=%s Initial=%d Remaining=%d InvalidDiscarded=%d SpawnLocation=%s"),
+            *GetNameSafe(ActorClass.Get()),
+            *GetNameSafe(PooledActor),
+            InitialPoolSize,
+            Pool.Num(),
+            InvalidDiscardedCount,
+            *SpawnTransform.GetLocation().ToCompactString());
+        return PooledActor;
     }
 
-    // 2. 풀 비어있다면 새로 스폰 (최초 실행 시)
+    UE_LOG(
+        LogPGPooling,
+        Log,
+        TEXT("[TryGetPooledActor] MISS Class=%s Initial=%d InvalidDiscarded=%d"),
+        *GetNameSafe(ActorClass.Get()),
+        InitialPoolSize,
+        InvalidDiscardedCount);
+
+    return nullptr;
+}
+
+AActor* UPGObjectPoolSubsystem::GetActorFromPool(TSubclassOf<AActor> ActorClass, const FTransform& SpawnTransform)
+{
+    if (!ActorClass)
+    {
+        UE_LOG(LogPGPooling, Warning, TEXT("[GetActorFromPool] Invalid ActorClass."));
+        return nullptr;
+    }
+
+    if (AActor* PooledActor = TryGetPooledActor(ActorClass, SpawnTransform))
+    {
+        return PooledActor;
+    }
+
+    // 풀이 비어있다면 새로 스폰 (최초 실행 시)
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    AActor* NewActor = GetWorld()->SpawnActor<AActor>(ActorClass, SpawnTransform, SpawnParams);
+    AActor* SpawnedActor = GetWorld()->SpawnActor<AActor>(ActorClass, SpawnTransform, SpawnParams);
 
-    return NewActor;
+    if (SpawnedActor)
+    {
+        UE_LOG(
+            LogPGPooling,
+            Log,
+            TEXT("[GetActorFromPool] SPAWN_NEW Class=%s Actor=%s SpawnLocation=%s"),
+            *GetNameSafe(ActorClass.Get()),
+            *GetNameSafe(SpawnedActor),
+            *SpawnTransform.GetLocation().ToCompactString());
+    }
+    else
+    {
+        UE_LOG(
+            LogPGPooling,
+            Warning,
+            TEXT("[GetActorFromPool] SPAWN_FAILED Class=%s SpawnLocation=%s"),
+            *GetNameSafe(ActorClass.Get()),
+            *SpawnTransform.GetLocation().ToCompactString());
+    }
+
+    return SpawnedActor;
 }
 
 void UPGObjectPoolSubsystem::ReturnActorToPool(AActor* ActorToReturn)
 {
-    if (!IsValid(ActorToReturn)) return;
+    if (!IsValid(ActorToReturn))
+    {
+        UE_LOG(LogPGPooling, Warning, TEXT("[ReturnActorToPool] Invalid Actor."));
+        return;
+    }
 
-
+    PGObjectPoolSubsystemInternal::SetActorToPooledState(ActorToReturn);
     TArray<AActor*>& Pool = ActorPool.FindOrAdd(ActorToReturn->GetClass()).Actors;
+    const int32 BeforeNum = Pool.Num();
     Pool.AddUnique(ActorToReturn);
+    const bool bDuplicate = (Pool.Num() == BeforeNum);
+
+    UE_LOG(
+        LogPGPooling,
+        Log,
+        TEXT("[ReturnActorToPool] %s Class=%s Actor=%s Before=%d After=%d"),
+        bDuplicate ? TEXT("DUPLICATE_IGNORED") : TEXT("RETURNED"),
+        *GetNameSafe(ActorToReturn->GetClass()),
+        *GetNameSafe(ActorToReturn),
+        BeforeNum,
+        Pool.Num());
 }
 
 void UPGObjectPoolSubsystem::PrewarmPool(TSubclassOf<AActor> ActorClass, int32 PoolSize)
 {
-    if (!ActorClass) return;
+    if (!ActorClass || PoolSize <= 0)
+    {
+        UE_LOG(
+            LogPGPooling,
+            Warning,
+            TEXT("[PrewarmPool] Skip. Class=%s RequestedSize=%d"),
+            *GetNameSafe(ActorClass.Get()),
+            PoolSize);
+        return;
+    }
 
     TArray<AActor*>& Pool = ActorPool.FindOrAdd(ActorClass).Actors;
+    const int32 BeforeCleanupSize = Pool.Num();
+    Pool.RemoveAll([](const AActor* Actor)
+    {
+        return !IsValid(Actor);
+    });
+    const int32 RemovedInvalidCount = BeforeCleanupSize - Pool.Num();
 
-    for (int32 i = 0; i < PoolSize; ++i)
+    const int32 AdditionalCount = FMath::Max(0, PoolSize - Pool.Num());
+    UE_LOG(
+        LogPGPooling,
+        Log,
+        TEXT("[PrewarmPool] Class=%s Requested=%d Existing=%d RemovedInvalid=%d ToSpawn=%d"),
+        *GetNameSafe(ActorClass.Get()),
+        PoolSize,
+        Pool.Num(),
+        RemovedInvalidCount,
+        AdditionalCount);
+
+    int32 SpawnedCount = 0;
+
+    for (int32 i = 0; i < AdditionalCount; ++i)
     {
         FActorSpawnParameters SpawnParams;
         SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -60,12 +186,26 @@ void UPGObjectPoolSubsystem::PrewarmPool(TSubclassOf<AActor> ActorClass, int32 P
 
         if (NewActor)
         {
-            // 스폰 직후 풀 반납 로직 실행 (숨기고, 콜리전 끄고, 틱 끄기)
-            // (Projectile이나 Magic 클래스로 캐스팅해서 OnReturnedToPool을 강제로 한 번 호출해주거나, 아래처럼 수동 처리)
-            NewActor->SetActorHiddenInGame(true);
-            NewActor->SetActorEnableCollision(false);
-
+            PGObjectPoolSubsystemInternal::SetActorToPooledState(NewActor);
             Pool.AddUnique(NewActor);
+            ++SpawnedCount;
+        }
+        else
+        {
+            UE_LOG(
+                LogPGPooling,
+                Warning,
+                TEXT("[PrewarmPool] Spawn failed for Class=%s at index=%d"),
+                *GetNameSafe(ActorClass.Get()),
+                i);
         }
     }
+
+    UE_LOG(
+        LogPGPooling,
+        Log,
+        TEXT("[PrewarmPool] Done Class=%s Spawned=%d FinalSize=%d"),
+        *GetNameSafe(ActorClass.Get()),
+        SpawnedCount,
+        Pool.Num());
 }

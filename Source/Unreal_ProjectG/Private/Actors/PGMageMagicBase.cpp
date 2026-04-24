@@ -68,6 +68,10 @@ void APGMageMagicBase::OnMagicBeginOverlap(UPrimitiveComponent* OverlappedCompon
 // --- [풀링: 창고에서 꺼낼 때 실행되는 초기화 로직] ---
 void APGMageMagicBase::OnActivatedFromPool_Implementation()
 {
+    SetActorHiddenInGame(false);
+    SetActorEnableCollision(true);
+    SetActorTickEnabled(PrimaryActorTick.bCanEverTick);
+
     // 1. 콜리전 다시 켜기
     if (MagicCollisionComponent)
     {
@@ -80,8 +84,7 @@ void APGMageMagicBase::OnActivatedFromPool_Implementation()
         MagicNiagaraComponent->Activate(true); // 이펙트 초기화 및 재생
     }
 
-    // 3. 액터 보이기
-    SetActorHiddenInGame(false);
+    // 3. 액터 표시/활성화는 상단에서 공통 처리
 }
 
 // --- [풀링: 창고로 들어갈 때 실행되는 정리 로직] ---
@@ -99,19 +102,21 @@ void APGMageMagicBase::OnReturnedToPool_Implementation()
         MagicNiagaraComponent->Deactivate();
     }
 
-    // 3. 액터 숨기기
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
     SetActorHiddenInGame(true);
 }
 
 // 풀 반납 도우미 함수
 void APGMageMagicBase::DeactivateAndReturnToPool()
 {
-    OnReturnedToPool();
-
     if (UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>())
     {
         PoolSubsystem->ReturnActorToPool(this);
+        return;
     }
+
+    OnReturnedToPool(); // fallback
 }
 
 void APGMageMagicBase::OnNiagaraFinished(UNiagaraComponent* PSystem)

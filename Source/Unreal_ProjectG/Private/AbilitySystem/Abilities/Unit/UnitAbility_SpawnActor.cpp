@@ -5,12 +5,13 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "DataAssets/Ability/DataAsset_SkillData.h"
+#include "Character/Unit/SubSystem/PGObjectPoolSubsystem.h"
 
 void UUnitAbility_SpawnActor::OnGiveAbility(const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilitySpec& Spec)
 {
     Super::OnGiveAbility(ActorInfo, Spec);
 
-    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(GetCurrentAbilitySpec()->SourceObject.Get());
+    UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(Spec.SourceObject.Get());
     if (DataAsset)
     {
         const FUnitSpawnActorAbilityConfig* Config = DataAsset->AbilityEntry.AbilityConfig.GetPtr<FUnitSpawnActorAbilityConfig>();
@@ -19,19 +20,31 @@ void UUnitAbility_SpawnActor::OnGiveAbility(const FGameplayAbilityActorInfo* Act
             UnitSpawnActorConfig = *Config;
         }
     }
-}
 
-void UUnitAbility_SpawnActor::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
-{
-    //==============================================
-    // FUnitSpawnActorConfig의 SoftPtr 로드
     UnitSpawnActorConfig.SpawnedActorClass.LoadSynchronous();
     for (TSoftObjectPtr<UAnimMontage>& Montage : UnitSpawnActorConfig.SpawnActorMontages)
     {
         Montage.LoadSynchronous();
     }
-    //==============================================
 
+    if (PoolPrewarmCount > 0)
+    {
+        UWorld* World = ActorInfo && ActorInfo->AvatarActor.IsValid() ? ActorInfo->AvatarActor->GetWorld() : GetWorld();
+        if (World)
+        {
+            if (UPGObjectPoolSubsystem* PoolSubsystem = World->GetSubsystem<UPGObjectPoolSubsystem>())
+            {
+                if (UClass* SpawnActorClass = UnitSpawnActorConfig.SpawnedActorClass.Get())
+                {
+                    PoolSubsystem->PrewarmPool(SpawnActorClass, PoolPrewarmCount);
+                }
+            }
+        }
+    }
+}
+
+void UUnitAbility_SpawnActor::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+{
     checkf(UnitSpawnActorConfig.SpawnActorMontages.Num() > 0, TEXT("SpawnMontage가 비어있습니다!"));
 
     // 램덤하게 하나의 몽타주 선택
@@ -85,6 +98,7 @@ void UUnitAbility_SpawnActor::SpawnActorEvent(FGameplayEventData InEventData)
 
     FVector BaseLocation = AvatarActor->GetActorLocation();
     FRotator SpawnRotation = AvatarActor->GetActorForwardVector().Rotation();
+    UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>();
 
     UE_LOG(LogTemp, Log, TEXT("액터스폰 시작 %d마리"), UnitSpawnActorConfig.SpawnCount);
     int32 CountToSpawn = FMath::Max(1, UnitSpawnActorConfig.SpawnCount);
@@ -98,23 +112,51 @@ void UUnitAbility_SpawnActor::SpawnActorEvent(FGameplayEventData InEventData)
             SpawnLocation += AvatarActor->GetActorRightVector() * OffsetY;
         }
 
-        AActor* SpawnedActor = GetWorld()->SpawnActorDeferred<AActor>(
-            UnitSpawnActorConfig.SpawnedActorClass.Get(),
-            FTransform(SpawnRotation, SpawnLocation),
-            AvatarActor,
-            Cast<APawn>(AvatarActor),
-            ESpawnActorCollisionHandlingMethod::AlwaysSpawn
-        );
+        const FTransform SpawnTransform(SpawnRotation, SpawnLocation);
+
+        AActor* SpawnedActor = nullptr;
+        if (PoolSubsystem)
+        {
+            SpawnedActor = PoolSubsystem->GetActorFromPool(UnitSpawnActorConfig.SpawnedActorClass.Get(), SpawnTransform);
+        }
+
+        if (!SpawnedActor)
+        {
+            SpawnedActor = GetWorld()->SpawnActorDeferred<AActor>(
+                UnitSpawnActorConfig.SpawnedActorClass.Get(),
+                SpawnTransform,
+                AvatarActor,
+                Cast<APawn>(AvatarActor),
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+        }
 
         if (SpawnedActor)
         {
+            SpawnedActor->SetOwner(AvatarActor);
+            SpawnedActor->SetInstigator(Cast<APawn>(AvatarActor));
+
             if (UnitSpawnActorConfig.DamageEffectClass)
             {
                 float MultiplierValue = UnitSpawnActorConfig.SkillMultiplier.GetValueAtLevel(GetAbilityLevel());
                 FGameplayEffectSpecHandle EffectSpecHandle = MakeOutgoingEffectSpecWithMultiplier(UnitSpawnActorConfig.DamageEffectClass.Get(), MultiplierValue);
             }
 
-            SpawnedActor->FinishSpawning(FTransform(SpawnRotation, SpawnLocation));
+            if (SpawnedActor->HasActorBegunPlay() == false)
+            {
+                SpawnedActor->FinishSpawning(SpawnTransform);
+            }
+
+            static const FName ActivatedFromPoolFuncName(TEXT("OnActivatedFromPool"));
+            if (UFunction* ActivateFunc = SpawnedActor->FindFunction(ActivatedFromPoolFuncName))
+            {
+                SpawnedActor->ProcessEvent(ActivateFunc, nullptr);
+            }
+            else
+            {
+                SpawnedActor->SetActorHiddenInGame(false);
+                SpawnedActor->SetActorEnableCollision(true);
+                SpawnedActor->SetActorTickEnabled(SpawnedActor->PrimaryActorTick.bCanEverTick);
+            }
 
             //SpawnedActor->AttachToActor(AvatarActor, FAttachmentTransformRules::KeepWorldTransform);
         }

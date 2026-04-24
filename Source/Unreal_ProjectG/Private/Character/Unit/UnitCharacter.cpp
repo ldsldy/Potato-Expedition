@@ -64,7 +64,7 @@ void AUnitCharacter::BeginPlay()
 
     UE_LOG(LogTemp, Log, TEXT("BeginPlay"));
 
-
+    InitUnitStartUpData();
 }
 
 void AUnitCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -130,13 +130,14 @@ void AUnitCharacter::InitUnitStartUpData()
     {
         return;
     }
+
     // 비동기로 스타트업 데이터 로드 및 적용
     UAssetManager::GetStreamableManager().RequestAsyncLoad(
         CharacterStartupData.ToSoftObjectPath(),
         FStreamableDelegate::CreateLambda(
             [this]()
             {
-                if (IsHidden() || !IsValid(this))
+                if (!IsValid(this))
                 {
                     return;
                 }
@@ -149,7 +150,18 @@ void AUnitCharacter::InitUnitStartUpData()
                         bIsAbilitiesInitialized = true; 
                     }
 
+                    // 풀 내부(비활성/숨김)에서는 능력 선지급만 수행한다.
+                    // 월드 등록/시각적 초기화는 활성화 시점에만 적용한다.
+                    if (IsHidden())
+                    {
+                        return;
+                    }
+
                     UDataAsset_UnitStartupData* StartUpData = Cast<UDataAsset_UnitStartupData>(LoadedData);
+                    if (!StartUpData)
+                    {
+                        return;
+                    }
 
                     if (StartUpData->BranchData)
                     {
@@ -212,9 +224,6 @@ void AUnitCharacter::InitUnitStartUpData()
                     {
                         OnUnitStartUpDataLoadedDelegate.Broadcast();
                     }
-
-
-
                 }
             }
         )
@@ -411,11 +420,17 @@ void AUnitCharacter::DeactivateUnit()
         MovementComp->Velocity = FVector::ZeroVector;
     }
 
+    // 2) GAS 큐/태스크/게임플레이 큐 정리
+    if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+    {
+        ASC->CancelAllAbilities();   // WaitGameplayEvent/몽타주 등 AbilityTask 종료
+        ASC->RemoveAllGameplayCues(); // 붙어있는 GameplayCue 일괄 제거
+    }
+
     // 4. 시각적 숨김 및 충돌 해제
     SetActorEnableCollision(false);
     SetActorHiddenInGame(true);
     SetActorTickEnabled(false);
-
 }
 
 

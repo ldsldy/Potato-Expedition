@@ -23,6 +23,10 @@ class UNREAL_PROJECTG_API UPGObjectPoolSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+    // 풀에 이미 존재하는 액터만 꺼내기 (없으면 nullptr 반환, 신규 스폰하지 않음)
+    UFUNCTION(BlueprintCallable, Category = "Pooling")
+    AActor* TryGetPooledActor(TSubclassOf<AActor> ActorClass, const FTransform& SpawnTransform);
+
     // 풀에서 액터 꺼내기
     UFUNCTION(BlueprintCallable, Category = "Pooling")
     AActor* GetActorFromPool(TSubclassOf<AActor> ActorClass, const FTransform& SpawnTransform);

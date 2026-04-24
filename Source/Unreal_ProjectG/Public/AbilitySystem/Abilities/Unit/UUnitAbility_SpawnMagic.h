@@ -28,4 +28,7 @@ protected:
 protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ability|Magic Attack")
     FUnitSpawnMagicAbilityConfig UnitSpawnMagicConfig;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability|Magic Attack", meta = (ClampMin = "0"))
+    int32 PoolPrewarmCount = 5;
 };

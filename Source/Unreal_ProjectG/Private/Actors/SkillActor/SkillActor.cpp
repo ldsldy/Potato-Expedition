@@ -11,8 +11,9 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Types/PGDataTableStruct.h"
+#include "Character/Unit/SubSystem/PGObjectPoolSubsystem.h"
 
-const FGameplayTag ASkillActor::DestroyedEventTag = PGGameplayTags::Shared_Event_ActorDestroy;
+const FGameplayTag ASkillActor::ReturnEventTag = PGGameplayTags::Shared_Event_ActorDestroy;
 
 
 ASkillActor::ASkillActor()
@@ -45,42 +46,100 @@ void ASkillActor::InitFromConfig(const FHeroSpawnableConfig& InConfig, int32 InA
         CollisionComponent->SetSphereRadius(FinalRadius);
     }
 
-    if (Config.LifeSpan > 0.f)
-    {
-        SetLifeSpan(Config.LifeSpan);
-    }
-
     RebuildEffectSpecsFromConfig();
+}
+
+FGameplayTag ASkillActor::GetReturnEventTag() const
+{
+    return ReturnEventTag;
 }
 
 FGameplayTag ASkillActor::GetDestroyedEventTag() const
 {
-    return DestroyedEventTag;
+    return GetReturnEventTag();
+}
+
+void ASkillActor::OnActivatedFromPool_Implementation()
+{
+    bReturnNotified = false;
+    CurrentTickCount = 0;
+    TickInterval = 0.f;
+    OverlappingTargets.Reset();
+
+    SetActorHiddenInGame(false);
+    SetActorEnableCollision(true);
+    SetActorTickEnabled(false);
+
+    if (CollisionComponent)
+    {
+        CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+        CollisionComponent->SetGenerateOverlapEvents(true);
+    }
+
+    if (ActorVFXComponent)
+    {
+        ActorVFXComponent->Activate(true);
+    }
+
+    if (ActorSFXComponent)
+    {
+        ActorSFXComponent->Play();
+    }
+
+    if (Config.HitsPerLifeSpan > 0.f && Config.LifeSpan > 0.f)
+    {
+        RefreshOverlappingTargets();
+        TickInterval = Config.LifeSpan / Config.HitsPerLifeSpan;
+
+        if (TickInterval > 0.f)
+        {
+            GetWorldTimerManager().SetTimer(
+                TickEffectTimerHandle,
+                this,
+                &ASkillActor::HandleTickEffects,
+                TickInterval,
+                true,
+                0.f);
+        }
+    }
+
+    StartLifeSpanTimerIfNeeded();
+}
+
+void ASkillActor::OnReturnedToPool_Implementation()
+{
+    ClearRuntimeTimers();
+    OverlappingTargets.Reset();
+    CurrentTickCount = 0;
+    TickInterval = 0.f;
+
+    if (ActorSFXComponent && ActorSFXComponent->IsPlaying())
+    {
+        ActorSFXComponent->Stop();
+    }
+
+    if (ActorVFXComponent)
+    {
+        ActorVFXComponent->Deactivate();
+    }
+
+    if (CollisionComponent)
+    {
+        CollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        CollisionComponent->SetGenerateOverlapEvents(false);
+    }
+
+    SetActorEnableCollision(false);
+    SetActorTickEnabled(false);
+    SetActorHiddenInGame(true);
 }
 
 void ASkillActor::BeginPlay()
 {
     Super::BeginPlay();
 
-    bDestroyNotified = false;
-
     CollisionComponent->OnComponentBeginOverlap.AddDynamic(this, &ASkillActor::OnSphereBeginOverlap);
     CollisionComponent->OnComponentEndOverlap.AddDynamic(this, &ASkillActor::OnSphereEndOverlap);
-
-    if (Config.HitsPerLifeSpan > 0.f)
-    {
-        RefreshOverlappingTargets();
-        CurrentTickCount = 0;
-
-        TickInterval = Config.LifeSpan / Config.HitsPerLifeSpan;
-        GetWorldTimerManager().SetTimer(
-            TickEffectTimerHandle,
-            this,
-            &ASkillActor::HandleTickEffects,
-            TickInterval,
-            true,
-            0.f);
-    }
 }
 
 // ==================================================
@@ -181,10 +240,10 @@ void ASkillActor::HandleInstantEffects(AActor* TargetActor)
     // 2. BP 이벤트 호출
     OnInstantHit(TargetActor);
 
-    // 투사체는 첫 충돌 후 파괴
+    // 투사체는 첫 충돌 후 즉시 반납
     if (Config.Speed > 0.f)
     {
-        NotifyAndDestroy();
+        NotifyAndReturnToPool();
     }
 }
 
@@ -213,17 +272,20 @@ void ASkillActor::ApplyEffectsToTarget(AActor* TargetActor)
 //===================================================
 // 헬퍼 함수
 //===================================================
-void ASkillActor::HandlePreDestroy()
+void ASkillActor::HandleBeforeReturnToPool()
 {
-    if (bDestroyNotified) return;
-    bDestroyNotified = true;
+    if (bReturnNotified)
+    {
+        return;
+    }
+    bReturnNotified = true;
 
     if (ActorSFXComponent && ActorSFXComponent->IsPlaying())
     {
         ActorSFXComponent->Stop();
     }
 
-    // 파괴 위치 전달
+    // 반납 위치 전달
     FGameplayAbilityTargetData_SingleTargetHit* Data = new FGameplayAbilityTargetData_SingleTargetHit();
 
     FHitResult HitResult;
@@ -233,13 +295,10 @@ void ASkillActor::HandlePreDestroy()
     FGameplayEventData Payload;
     Payload.TargetData.Add(Data);
 
-    UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(GetOwner(), DestroyedEventTag, Payload);
+    UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(GetOwner(), ReturnEventTag, Payload);
 
     // 후속 스폰
     SpawnFollowUpActor();
-
-    // BP 이벤트 호출
-    OnSkillActorDestroyed();
 }
 
 void ASkillActor::RefreshOverlappingTargets()
@@ -310,47 +369,103 @@ void ASkillActor::SpawnFollowUpActor()
     }
 
     const FTransform SpawnTransform(GetActorRotation(), GetActorLocation() + SpawnOffset);
+    FHeroSpawnableConfig FollowUpConfig = MakeSpawnableConfigFromFollowUp(Config.NextSpawn);
 
-    ASkillActor* Spawned = GetWorld()->SpawnActorDeferred<ASkillActor>(
+    UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>();
+    ASkillActor* Spawned = nullptr;
+
+    if (PoolSubsystem)
+    {
+        Spawned = Cast<ASkillActor>(PoolSubsystem->TryGetPooledActor(Config.NextSpawn.ActorClass, SpawnTransform));
+    }
+
+    // 풀에서 꺼낸 액터든 신규 스폰이든, 동일한 초기화 순서를 보장한다.
+    // InitFromConfig -> FinishSpawning(신규만) -> OnActivatedFromPool
+    if (Spawned)
+    {
+        Spawned->SetOwner(OwnerActor);
+        Spawned->SetInstigator(Cast<APawn>(OwnerActor));
+        PropagateRuntimeMultipliersTo(Spawned);
+        Spawned->InitFromConfig(FollowUpConfig, CachedAbilityLevel);
+        Spawned->OnActivatedFromPool();
+        return;
+    }
+
+    Spawned = GetWorld()->SpawnActorDeferred<ASkillActor>(
         Config.NextSpawn.ActorClass,
         SpawnTransform,
         OwnerActor,
         Cast<APawn>(OwnerActor),
         ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 
-    if (!Spawned) return;
+    if (!Spawned)
+    {
+        return;
+    }
 
-    FHeroSpawnableConfig FollowUpConfig = MakeSpawnableConfigFromFollowUp(Config.NextSpawn);
-
-
-    // 현재 배율을 후속 액터로 전달(후속이 Init에서 Spec 생성할 때 반영됨)
     Spawned->SetOwner(OwnerActor);
     Spawned->SetInstigator(Cast<APawn>(OwnerActor));
     PropagateRuntimeMultipliersTo(Spawned);
     Spawned->InitFromConfig(FollowUpConfig, CachedAbilityLevel);
     Spawned->FinishSpawning(SpawnTransform);
+    Spawned->OnActivatedFromPool();
 }
 
 // ==================================================
-// 파괴
+// 반납
 // ==================================================
+void ASkillActor::NotifyAndReturnToPool()
+{
+    HandleBeforeReturnToPool();
+
+    if (UPGObjectPoolSubsystem* PoolSubsystem = GetWorld()->GetSubsystem<UPGObjectPoolSubsystem>())
+    {
+        PoolSubsystem->ReturnActorToPool(this);
+        return;
+    }
+
+    OnReturnedToPool();
+}
+
 void ASkillActor::NotifyAndDestroy()
 {
-    if (bDestroyNotified) return;
-    
-    HandlePreDestroy();
-    Destroy(); // TODO: 나중에 풀링 시스템 고려
+    NotifyAndReturnToPool();
 }
 
 void ASkillActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    GetWorldTimerManager().ClearTimer(TickEffectTimerHandle);
+    ClearRuntimeTimers();
 
-    HandlePreDestroy();
+    HandleBeforeReturnToPool();
 
     Super::EndPlay(EndPlayReason);
 }
 
+void ASkillActor::StartLifeSpanTimerIfNeeded()
+{
+    if (Config.LifeSpan <= 0.f)
+    {
+        return;
+    }
+
+    GetWorldTimerManager().SetTimer(
+        LifeSpanTimerHandle,
+        this,
+        &ASkillActor::OnLifeSpanExpired,
+        Config.LifeSpan,
+        false);
+}
+
+void ASkillActor::ClearRuntimeTimers()
+{
+    GetWorldTimerManager().ClearTimer(TickEffectTimerHandle);
+    GetWorldTimerManager().ClearTimer(LifeSpanTimerHandle);
+}
+
+void ASkillActor::OnLifeSpanExpired()
+{
+    NotifyAndReturnToPool();
+}
 
 // ==================================================
 // ==================================================
