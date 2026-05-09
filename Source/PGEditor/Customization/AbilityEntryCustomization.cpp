@@ -65,8 +65,10 @@ void FAbilityEntryCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> P
     UpdateConfigStructFilter();
 
     // AbilityClass 변경 감지 -> Config 초기화
+    // CreateSP는 객체를 TWeakPtr로 보관하고 호출 시 Pin()으로 유효성을 확인하므로, 
+    // 객체가 소멸된 뒤에는 콜백을 실행하지 않아 댕글링 호출을 방지한다.
      AbilityClassHandle->SetOnPropertyValueChanged(
-        FSimpleDelegate::CreateSP(this, &FAbilityEntryCustomization::OnAbilityClassChanged)); // Create SP는 SharedFromThis 기반이라 객체가 소멸되면 자동으로 델리게이트 실행을 멈춤
+        FSimpleDelegate::CreateSP(this, &FAbilityEntryCustomization::OnAbilityClassChanged)); 
     //AbilityClassHandle->SetOnPropertyValueChanged(
         //FSimpleDelegate::CreateRaw(this, &FAbilityEntryCustomization::OnAbilityClassChanged));
 

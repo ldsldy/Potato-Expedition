@@ -18,9 +18,11 @@ void UUnitAbility_BaseMeleeAttack::OnGiveAbility(const FGameplayAbilityActorInfo
     UDataAsset_SkillData* DataAsset = Cast<UDataAsset_SkillData>(GetCurrentAbilitySpec()->SourceObject.Get());
     if (DataAsset)
     {
+        // AbilityConfig(InsancedStruct)에서 FUnitBaseMeleeAttackAbilityConfig 타입으로 캐스트 가능한 데이터 포인터를 가져오는 코드
         const FUnitBaseMeleeAttackAbilityConfig* Config = DataAsset->AbilityEntry.AbilityConfig.GetPtr<FUnitBaseMeleeAttackAbilityConfig>();
         if (Config)
         {
+            // 타입이 일치하는 경우, AbilityConfig의 데이터를 MeleeAttackConfig에 복사
             MeleeAttackConfig = *Config;
         }
     }
