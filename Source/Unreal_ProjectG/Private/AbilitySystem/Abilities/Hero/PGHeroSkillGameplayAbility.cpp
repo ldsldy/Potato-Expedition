@@ -45,7 +45,7 @@ void UPGHeroSkillGameplayAbility::OnGiveAbility(const FGameplayAbilityActorInfo*
 
     if (CachedMainActionSequence.IsEmpty())
     {
-        CachedMainActionSequence = SkillData->ActionSequence;
+        CachedMainActionSequence = SkillData->MainSequence;
     }
 
     for (const FSkillActionRow& ActionRow : CachedMainActionSequence)
@@ -212,7 +212,7 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
         SkillData = ActiveSkillData;
     }
 
-    if (!ActiveSkillData || ActiveSkillData->ActionSequence.IsEmpty())
+    if (!ActiveSkillData || ActiveSkillData->MainSequence.IsEmpty())
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
@@ -242,7 +242,7 @@ void UPGHeroSkillGameplayAbility::ActivateAbility(
 
     if (RuntimeActionSequence.IsEmpty())
     {
-        RuntimeActionSequence = ActiveSkillData->ActionSequence;
+        RuntimeActionSequence = ActiveSkillData->MainSequence;
     }
 
     if (CachedMainActionSequence.IsEmpty() && !RuntimeActionSequence.IsEmpty())
